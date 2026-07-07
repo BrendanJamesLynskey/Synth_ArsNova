@@ -1,6 +1,6 @@
-# Synth Ars Nova — Isorhythmic FM Synthesizer
+# Synth Ars Nova — Isorhythmic Sung Motet
 
-A web-based synthesizer that weaves the 14th-century French **Ars Nova** in real time in the browser. No samples, no libraries — the reedy medieval winds and buzzy organ timbres are built with true **FM (frequency-modulation) synthesis**, over an **isorhythmic** tenor, using only the Web Audio API.
+A web-based synthesizer that weaves the 14th-century French **Ars Nova** in real time in the browser. No samples, no libraries — the isorhythmic motet was *sung*, so the haunting upper voices are built with **formant vocal synthesis** (a glottal source shaped into sung Latin vowels) over an **isorhythmic** *talea/color* engine carried on a sustained **instrumental tenor**, using only the Web Audio API.
 
 **[Launch the app](https://brendanjameslynskey.github.io/Synth_ArsNova/)** — auto-detects your device and recommends desktop or mobile.
 
@@ -14,12 +14,13 @@ Its defining device is **isorhythm**: a repeating rhythmic pattern — the *tale
 
 ## How it sounds high quality
 
-Rather than pure tones, the engine voices each part with **true FM synthesis** — a carrier oscillator whose frequency is modulated by a second oscillator:
+The motet was *sung*, so rather than pure tones the engine models the human singing voice with **source–filter (formant) synthesis** for the upper parts, held over a sustained instrumental tenor:
 
-- **Carrier + modulator** — every note is a real carrier/modulator pair. The **carrier:modulator ratio** sets the timbre family; the **modulation index** (the modulator's depth in Hz on the carrier frequency) sets its brightness and buzz.
-- **Reedy attack** — the modulation index is *enveloped* per note: a fast-decaying burst at onset gives the double-reed bite of a shawm before settling to a rounder sustain.
-- **Three FM presets** — a **shawm / bombarde** (ratio ≈ 2.5, high index, bright buzzy double reed), a **portative organ** (ratio 1, moderate index, rounder), and a **medieval fiddle / cantus** (ratio ≈ 1.5), plus a triplum blend. Each note carries an amplitude ADSR, subtle vibrato, and per-note detune jitter so the ensemble is a living sound.
-- **Isorhythm engine** — the tenor is driven by a repeating *talea* + *color* of different lengths; faster cantus / contratenor / triplum voices weave stepwise figures above it. A large gothic-**hall convolution reverb** (~6 s tail with early reflections) sets it in stone.
+- **Glottal source** — each sung note starts from a glottal-pulse `PeriodicWave` whose harmonics roll off ~1/n^1.1, like the flow through vibrating vocal folds.
+- **Formant vocal tract** — each upper voice (cantus · contratenor · triplum) has its **own persistent vocal tract**: a bank of four parallel resonant band-pass **formants** tuned to sung Latin vowels (a e i o u). Only the fold pitch changes from note to note, exactly as in real singing, and each voice sings its own vowel colour (cantus bright *a/e*, contratenor dark *o/u*, triplum *e/i*).
+- **Living, haunting choir** — gentle per-note detune/jitter, two folds per note, and vibrato that blooms on held notes give the shimmering, human choral sound. Voices layer additively via the Ensemble control.
+- **Instrumental tenor** — the isorhythmic cantus firmus is carried on a mellow **FM bowed/reed/organ** tone: long, sustained notes that ground the sung polyphony above.
+- **Isorhythm engine** — the tenor is driven by a repeating *talea* + *color* of different lengths; faster sung voices weave stepwise figures above it. A large chapel-**hall convolution reverb** (~6 s tail with early reflections) sets it in stone.
 
 ## Where it sits — the lineage of early Western music
 
@@ -38,10 +39,10 @@ A parallel, secular, vernacular branch runs alongside it: **Troubadour** song �
 | App | Style | Synthesis technique |
 |---|---|---|
 | [Synth Gregorian](https://github.com/BrendanJamesLynskey/Synth_Gregorian) | Plainsong | Source–filter formant vocal synthesis |
-| [Synth Organum](https://github.com/BrendanJamesLynskey/Synth_Organum) | Notre-Dame polyphony | Additive synthesis in Pythagorean just intonation |
-| **Synth Ars Nova** (this) | 14th-c. isorhythm | FM synthesis |
-| [Synth Troubadour](https://github.com/BrendanJamesLynskey/Synth_Troubadour) | Secular monophony | Subtractive synthesis |
-| [Synth Estampie](https://github.com/BrendanJamesLynskey/Synth_Estampie) | Medieval dance | Physical modelling |
+| [Synth Organum](https://github.com/BrendanJamesLynskey/Synth_Organum) | Notre-Dame polyphony | Formant vocal polyphony in Pythagorean just intonation |
+| **Synth Ars Nova** (this) | 14th-c. isorhythm | Formant vocal synthesis (sung upper voices) with an isorhythmic *talea/color* engine over an instrumental tenor |
+| [Synth Troubadour](https://github.com/BrendanJamesLynskey/Synth_Troubadour) | Secular monophony | Formant vocal melody over a subtractive drone |
+| [Synth Estampie](https://github.com/BrendanJamesLynskey/Synth_Estampie) | Medieval dance | Physical modelling (instrumental dance) |
 
 ## Quick start
 
@@ -60,7 +61,7 @@ Open <http://localhost:8080> and press **Sound the Motet**. Any static file serv
 | `index.html` | Landing page — detects device, links to desktop or mobile |
 | `desktop.html` | Desktop web app |
 | `style.css` | Courtly-Gothic styles (vermilion, royal purple, gold) |
-| `arsnova-engine.js` | FM + isorhythm synthesis engine (Web Audio API) |
+| `arsnova-engine.js` | Formant vocal + isorhythm synthesis engine (Web Audio API) |
 | `app.js` | UI controller, isorhythmic-grid visualizer, gilt motes |
 | `arsnova_mobile.html` | Self-contained mobile version (single file) |
 
@@ -70,7 +71,7 @@ Open <http://localhost:8080> and press **Sound the Motet**. Any static file serv
 |---|---|
 | **Mode** | One of the 8 church tones (Dorian → Hypomixolydian) — the pitch collection |
 | **Voice** | Overall ensemble volume |
-| **FM Timbre** | Global FM modulation index — from rounded to bright, reedy and buzzy |
+| **Vocal Colour** | Vocal-formant openness of the sung voices (and the tenor's tone) — from covered to bright and open |
 | **Hall Reverb** | Wet/dry mix of the gothic-hall convolution reverb |
 | **Pace** | Tactus speed of the upper voices over the isorhythmic tenor |
 | **Ensemble** | Duet (2 · Tenor+Cantus), Trio (3 · +Contratenor), Quatre (4 · +Triplum) |
