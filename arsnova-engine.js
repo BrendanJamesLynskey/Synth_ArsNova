@@ -1,22 +1,22 @@
 /**
- * Ars Nova Synthesis Engine — Formant Vocal Synthesis + Isorhythm
+ * Ars Nova Synthesis Engine — FOF Vocal Synthesis + Isorhythm
  *
  * The 14th-century French Ars Nova (Philippe de Vitry, Guillaume de Machaut)
  * was SUNG: the isorhythmic motet is polyphony for human voices. This engine
  * therefore voices the faster upper parts (cantus · contratenor · triplum)
- * with source–filter (formant) VOCAL synthesis, and holds them over a slow,
- * sustained INSTRUMENTAL tenor — historically the isorhythmic cantus firmus
- * was very often carried on an instrument while the upper voices were sung.
+ * with the shared `vocal-voices.js` vocal-synthesis library, and holds them
+ * over a slow, sustained INSTRUMENTAL tenor — historically the isorhythmic
+ * cantus firmus was very often carried on an instrument while the upper voices
+ * were sung.
  *
- *   - VOICE (upper) : source–filter vocal synthesis. A glottal-pulse source
- *                     (a `PeriodicWave` whose harmonics roll off ~1/n^1.1, like
- *                     flow through the vocal folds) is shaped by a bank of four
- *                     parallel resonant formant band-pass filters that give each
- *                     singer a sung Latin vowel (a e i o u). Each upper voice has
- *                     its OWN persistent vocal tract; only the fold pitch changes
- *                     from note to note, exactly as in real singing. Gentle
- *                     per-note detune/jitter and vibrato-on-held-notes give the
- *                     living, haunting choral shimmer.
+ *   - VOICE (upper) : the `vocal-voices.js` library (default technique FOF —
+ *                     Fonction d'Onde Formantique, the IRCAM CHANT method): a
+ *                     burst of overlapping formant grains per glottal period
+ *                     reconstructs a true sung vocal spectrum with real Latin
+ *                     vowel formants (a e i o u). Each upper voice is a small
+ *                     chorus of persistent detuned library singers; only the
+ *                     fold pitch and vowel change from note to note, exactly as
+ *                     in real singing, for a living, haunting choral shimmer.
  *   - TENOR (instr) : a restrained FM tone (a mellow bowed/reed/organ colour) on
  *                     long sustained notes — the grounding cantus firmus.
  *
@@ -45,12 +45,12 @@ class ArsNovaEngine {
         this.activeNotes = [];
 
         this.masterGain = null;
+        this.limiter = null;
         this.voiceBus = null;
         this.reverbGain = null;
         this.dryGain = null;
         this.convolver = null;
         this.analyser = null;
-        this.glottalWave = null;
 
         // Tenor sits low; upper voices are lifted an octave.
         this.basePitch = 146.83;        // D3
@@ -101,7 +101,13 @@ class ArsNovaEngine {
 
         this.masterGain = this.ctx.createGain();
         this.masterGain.gain.value = 0.85;
-        this.masterGain.connect(this.ctx.destination);
+
+        // Soft limiter before the destination keeps the ensemble from clipping.
+        this.limiter = this.ctx.createDynamicsCompressor();
+        this.limiter.threshold.value = -8; this.limiter.knee.value = 8;
+        this.limiter.ratio.value = 6; this.limiter.attack.value = 0.004; this.limiter.release.value = 0.25;
+        this.masterGain.connect(this.limiter);
+        this.limiter.connect(this.ctx.destination);
 
         this.analyser = this.ctx.createAnalyser();
         this.analyser.fftSize = 2048;
@@ -125,20 +131,8 @@ class ArsNovaEngine {
         this.convolver.connect(this.reverbGain);
         this.reverbGain.connect(this.masterGain);
 
-        this.buildGlottalWave();
-    }
-
-    /**
-     * The glottal source: harmonics rolling off ~ -11 dB/oct (1/n^1.1). Rich
-     * enough that the upper formants have partials to resonate — a full,
-     * choral tone rather than a thin sine.
-     */
-    buildGlottalWave() {
-        const n = 48;
-        const real = new Float32Array(n);
-        const imag = new Float32Array(n);
-        for (let k = 1; k < n; k++) imag[k] = 1 / Math.pow(k, 1.1);
-        this.glottalWave = this.ctx.createPeriodicWave(real, imag, { disableNormalization: false });
+        // Load the vocal-synthesis worklets (FOF, vocal tract) once.
+        await VocalVoices.init(this.ctx);
     }
 
     /** Large chapel/gothic hall — ~6 s tail with sparse early reflections. */
@@ -174,20 +168,13 @@ class ArsNovaEngine {
         return this.centsToFreq(m.intervals[idx]) * Math.pow(2, oct);
     }
 
-    /** Relative gains of the four formants for the current vocal brightness. */
-    formantGains() {
-        // Brightness opens the upper formants (F3/F4) — from covered to bright.
-        const hi = 0.55 + this.brightness * 0.95;
-        return [1.0, 0.5, 0.28 * hi, 0.16 * hi];
-    }
-
     /**
      * Build one ensemble part.
      *
      *  - INSTRUMENTAL TENOR (vocal:false): just a fade-in bus; notes are FM.
-     *  - SUNG UPPER VOICE (vocal:true): a persistent vocal tract —
-     *        sourceGain → [4 parallel band-pass formants → formant gain] → busGain → voiceBus
-     *    Note oscillators (the vocal folds) connect transiently into sourceGain.
+     *  - SUNG UPPER VOICE (vocal:true): a small chorus of persistent FOF library
+     *        singers — voice.output → noteGain (per-note envelope) → busGain →
+     *        voiceBus. Only the fold pitch and vowel change from note to note.
      */
     createPart(cfg, index) {
         const now = this.ctx.currentTime;
@@ -206,45 +193,31 @@ class ArsNovaEngine {
         };
 
         if (cfg.vocal) {
-            // --- Persistent vocal tract ---
-            const sourceGain = this.ctx.createGain();
-            sourceGain.gain.value = 1.0;
+            // --- Persistent chorus of FOF library singers ---
+            const noteGain = this.ctx.createGain();
+            noteGain.gain.value = 0.0001;
+            noteGain.connect(busGain);
 
             const vowels = cfg.vowels;
             const vowel0 = vowels[0];
-            const centres = this.vowels[vowel0];
-            const relGains = this.formantGains();
-            const bandwidths = [80, 90, 120, 150];
-            const formants = [];
-            for (let f = 0; f < 4; f++) {
-                const bp = this.ctx.createBiquadFilter();
-                bp.type = 'bandpass';
-                bp.frequency.value = centres[f];
-                bp.Q.value = Math.max(1, centres[f] / bandwidths[f]);
-                const fg = this.ctx.createGain();
-                fg.gain.value = relGains[f];
-                sourceGain.connect(bp);
-                bp.connect(fg);
-                fg.connect(busGain);
-                formants.push({ bp, fg, bandwidth: bandwidths[f], rel: [1.0, 0.5, 0.28, 0.16][f] });
-            }
-
-            // A touch of raw source bleeds through so the voice stays present.
-            const bleed = this.ctx.createGain();
-            bleed.gain.value = 0.1;
-            sourceGain.connect(bleed);
-            bleed.connect(busGain);
-
             // Two folds per note (a hair of detune) make each singer fuller.
             const detunes = [0, 7];
+            const singers = detunes.map((cents, di) => {
+                const v = VocalVoices.create(this.ctx, {
+                    technique: 'fof', vowel: vowel0, detuneCents: detuneCents + cents,
+                    breath: 0.06, vibDepth: 0.006 + di * 0.001
+                });
+                const sg = this.ctx.createGain();
+                sg.gain.value = di === 0 ? 1.0 : 0.55;
+                v.output.connect(sg); sg.connect(noteGain);
+                return v;
+            });
 
-            part.sourceGain = sourceGain;
-            part.formants = formants;
-            part.bleed = bleed;
+            part.noteGain = noteGain;
+            part.singers = singers;
             part.vowels = vowels;
             part.vowel = vowel0;
             part.vowelPos = 0;
-            part.detunes = detunes;
         } else {
             part.preset = this.tenorPreset;
         }
@@ -276,22 +249,20 @@ class ArsNovaEngine {
                 part.busGain.gain.cancelScheduledValues(now);
                 part.busGain.gain.setValueAtTime(part.busGain.gain.value, now);
                 part.busGain.gain.linearRampToValueAtTime(0, now + 1.6);
+                if (part.singers) {
+                    const s = part.singers;
+                    setTimeout(() => { s.forEach(v => { try { v.dispose(); } catch (e) {} }); }, 1900);
+                }
             } catch (e) {}
         }
         this.parts = [];
     }
 
-    /** Ramp a sung voice's formant bank toward a new vowel (tract transition). */
+    /** Morph a sung voice's library chorus toward a new vowel. */
     setVowel(part, vowel) {
-        const target = this.vowels[vowel];
-        if (!target || !part.formants) return;
+        if (!this.vowels[vowel] || !part.singers) return;
         const now = this.ctx.currentTime;
-        part.formants.forEach((fm, f) => {
-            fm.bp.frequency.cancelScheduledValues(now);
-            fm.bp.frequency.setValueAtTime(fm.bp.frequency.value, now);
-            fm.bp.frequency.linearRampToValueAtTime(target[f], now + 0.12);
-            fm.bp.Q.setValueAtTime(Math.max(1, target[f] / fm.bandwidth), now + 0.12);
-        });
+        part.singers.forEach(v => v.setVowel(vowel, now));
         part.vowel = vowel;
     }
 
@@ -377,10 +348,10 @@ class ArsNovaEngine {
     }
 
     /**
-     * Sing one note on an upper voice: glottal-pulse fold oscillator(s) through a
-     * per-note amplitude envelope into the singer's persistent formant tract
-     * (part.sourceGain). Held notes bloom with gentle vibrato; stepwise notes
-     * glide legato from the previous pitch.
+     * Sing one note on an upper voice by steering the part's persistent FOF
+     * library chorus (pitch + vowel) and re-shaping the shared per-note
+     * amplitude envelope (part.noteGain). Stepwise notes glide legato from the
+     * previous pitch; the library adds its own gentle vibrato and breath.
      */
     playVoiceNote(part, freq, duration, delay, vowel, slideFrom) {
         if (!isFinite(freq) || freq <= 0 || !isFinite(duration) || duration <= 0) return;
@@ -388,54 +359,22 @@ class ArsNovaEngine {
 
         if (vowel) this.setVowel(part, vowel);
 
-        const amp = this.ctx.createGain();
+        const glide = (slideFrom && isFinite(slideFrom)) ? Math.min(0.12, duration * 0.4) : 0;
+        part.singers.forEach(v => {
+            if (glide > 0) { v.setFrequency(slideFrom, t0, 0); v.setFrequency(freq, t0, glide); }
+            else v.setFrequency(freq, t0, 0);
+            v.setLevel(1, t0);
+        });
+
+        const g = part.noteGain.gain;
         const attack = Math.min(0.09, duration * 0.4);
         const release = Math.max(0.18, duration * 0.55);
         const peak = 0.7;
-        amp.gain.setValueAtTime(0.0001, t0);
-        amp.gain.linearRampToValueAtTime(peak, t0 + attack);
-        amp.gain.setValueAtTime(peak * 0.92, t0 + Math.max(attack, duration * 0.6));
-        amp.gain.exponentialRampToValueAtTime(0.0008, t0 + duration + release);
-        amp.connect(part.sourceGain);
-
-        const oscs = [];
-        part.detunes.forEach((cents, di) => {
-            const osc = this.ctx.createOscillator();
-            osc.setPeriodicWave(this.glottalWave);
-            osc.detune.value = part.detuneCents + cents + (Math.random() - 0.5) * 6;   // human jitter
-            if (slideFrom && isFinite(slideFrom)) {
-                osc.frequency.setValueAtTime(slideFrom, t0);
-                osc.frequency.exponentialRampToValueAtTime(freq, t0 + Math.min(0.12, duration * 0.4));
-            } else {
-                osc.frequency.setValueAtTime(freq, t0);
-            }
-            const copyGain = this.ctx.createGain();
-            copyGain.gain.value = di === 0 ? 1.0 : 0.55;
-            osc.connect(copyGain);
-            copyGain.connect(amp);
-            osc.start(t0);
-            osc.stop(t0 + duration + release + 0.1);
-            oscs.push(osc);
-        });
-
-        // Gentle vibrato blooms on longer, held notes (choral, not operatic).
-        if (duration > 0.5) {
-            const vib = this.ctx.createOscillator();
-            vib.type = 'sine';
-            vib.frequency.value = 4.8 + Math.random() * 1.0;
-            const vibDepth = this.ctx.createGain();
-            vibDepth.gain.value = freq * 0.006;
-            vib.connect(vibDepth);
-            oscs.forEach(o => vibDepth.connect(o.frequency));
-            vib.start(t0 + attack); vib.stop(t0 + duration + release);
-        }
-
-        const node = { oscs, amp };
-        this.activeNotes.push(node);
-        setTimeout(() => {
-            const idx = this.activeNotes.indexOf(node);
-            if (idx > -1) this.activeNotes.splice(idx, 1);
-        }, ((delay || 0) + duration + release + 0.3) * 1000);
+        g.cancelScheduledValues(t0);
+        g.setValueAtTime(Math.max(0.0001, g.value), t0);
+        g.linearRampToValueAtTime(peak, t0 + attack);
+        g.setValueAtTime(peak * 0.92, t0 + Math.max(attack, duration * 0.6));
+        g.exponentialRampToValueAtTime(0.0008, t0 + duration + release);
     }
 
     /**
@@ -536,21 +475,12 @@ class ArsNovaEngine {
     }
 
     /**
-     * Brightness / Timbre → vocal-formant openness (F3/F4 gain) for the sung
-     * voices, and the instrumental tenor's FM colour. Same method name the UI
-     * already calls; only the meaning is now "vocal brightness / vowel openness".
+     * Brightness / Timbre → the instrumental tenor's FM colour (mod-index scale,
+     * applied per note in playTenorNote). Same method name the UI already calls;
+     * the sung upper voices now come from the shared FOF library.
      */
     setBrightness(v) {
         this.brightness = v;
-        if (!this.ctx) return;
-        const now = this.ctx.currentTime;
-        const rel = this.formantGains();
-        for (const part of this.parts) {
-            if (!part.vocal || !part.formants) continue;
-            part.formants.forEach((fm, f) => {
-                fm.fg.gain.linearRampToValueAtTime(rel[f], now + 0.2);
-            });
-        }
     }
 
     setReverbMix(v) {

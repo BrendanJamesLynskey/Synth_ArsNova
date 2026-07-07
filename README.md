@@ -1,6 +1,6 @@
 # Synth Ars Nova — Isorhythmic Sung Motet
 
-A web-based synthesizer that weaves the 14th-century French **Ars Nova** in real time in the browser. No samples, no libraries — the isorhythmic motet was *sung*, so the haunting upper voices are built with **formant vocal synthesis** (a glottal source shaped into sung Latin vowels) over an **isorhythmic** *talea/color* engine carried on a sustained **instrumental tenor**, using only the Web Audio API.
+A web-based synthesizer that weaves the 14th-century French **Ars Nova** in real time in the browser. No samples, no external dependencies — the isorhythmic motet was *sung*, so the haunting upper voices are built with the shared **FOF vocal-synthesis** library ([`vocal-voices.js`](vocal-voices.js), the IRCAM *CHANT* method — sung Latin vowels from overlapping formant grains) over an **isorhythmic** *talea/color* engine carried on a sustained **instrumental tenor**, using only the Web Audio API.
 
 **[Launch the app](https://brendanjameslynskey.github.io/Synth_ArsNova/)** — auto-detects your device and recommends desktop or mobile.
 
@@ -14,13 +14,13 @@ Its defining device is **isorhythm**: a repeating rhythmic pattern — the *tale
 
 ## How it sounds high quality
 
-The motet was *sung*, so rather than pure tones the engine models the human singing voice with **source–filter (formant) synthesis** for the upper parts, held over a sustained instrumental tenor:
+The motet was *sung*, so rather than pure tones the engine voices the upper parts with the shared **FOF vocal-synthesis** library ([`vocal-voices.js`](vocal-voices.js), default technique **FOF** — the IRCAM *CHANT* method), held over a sustained instrumental tenor:
 
-- **Glottal source** — each sung note starts from a glottal-pulse `PeriodicWave` whose harmonics roll off ~1/n^1.1, like the flow through vibrating vocal folds.
-- **Formant vocal tract** — each upper voice (cantus · contratenor · triplum) has its **own persistent vocal tract**: a bank of four parallel resonant band-pass **formants** tuned to sung Latin vowels (a e i o u). Only the fold pitch changes from note to note, exactly as in real singing, and each voice sings its own vowel colour (cantus bright *a/e*, contratenor dark *o/u*, triplum *e/i*).
+- **FOF grains** — once per glottal period a burst of overlapping damped formant **grains** is fired, reconstructing a true sung vocal spectrum with real Latin-vowel formants (a e i o u). It runs sample-accurately in an `AudioWorklet`.
+- **Persistent voices** — each upper voice (cantus · contratenor · triplum) is a small chorus of persistent library singers; only the pitch and vowel change from note to note, exactly as in real singing, and each voice sings its own vowel colour (cantus bright *a/e*, contratenor dark *o/u*, triplum *e/i*).
 - **Living, haunting choir** — gentle per-note detune/jitter, two folds per note, and vibrato that blooms on held notes give the shimmering, human choral sound. Voices layer additively via the Ensemble control.
 - **Instrumental tenor** — the isorhythmic cantus firmus is carried on a mellow **FM bowed/reed/organ** tone: long, sustained notes that ground the sung polyphony above.
-- **Isorhythm engine** — the tenor is driven by a repeating *talea* + *color* of different lengths; faster sung voices weave stepwise figures above it. A large chapel-**hall convolution reverb** (~6 s tail with early reflections) sets it in stone.
+- **Isorhythm engine** — the tenor is driven by a repeating *talea* + *color* of different lengths; faster sung voices weave stepwise figures above it. A soft limiter and a large chapel-**hall convolution reverb** (~6 s tail with early reflections) set it in stone.
 
 ## Where it sits — the lineage of early Western music
 
@@ -40,7 +40,7 @@ A parallel, secular, vernacular branch runs alongside it: **Troubadour** song �
 |---|---|---|
 | [Synth Gregorian](https://github.com/BrendanJamesLynskey/Synth_Gregorian) | Plainsong | Source–filter formant vocal synthesis |
 | [Synth Organum](https://github.com/BrendanJamesLynskey/Synth_Organum) | Notre-Dame polyphony | FOF vocal synthesis in Pythagorean just intonation |
-| **Synth Ars Nova** (this) | 14th-c. isorhythm | Formant vocal synthesis (sung upper voices) with an isorhythmic *talea/color* engine over an instrumental tenor |
+| **Synth Ars Nova** (this) | 14th-c. isorhythm | FOF vocal synthesis (shared `vocal-voices.js` library, sung upper voices) with an isorhythmic *talea/color* engine over an instrumental tenor |
 | [Synth Troubadour](https://github.com/BrendanJamesLynskey/Synth_Troubadour) | Secular monophony | Formant vocal melody over a subtractive drone |
 | [Synth Estampie](https://github.com/BrendanJamesLynskey/Synth_Estampie) | Medieval dance | Physical modelling (instrumental dance) |
 
@@ -61,7 +61,8 @@ Open <http://localhost:8080> and press **Sound the Motet**. Any static file serv
 | `index.html` | Landing page — detects device, links to desktop or mobile |
 | `desktop.html` | Desktop web app |
 | `style.css` | Courtly-Gothic styles (vermilion, royal purple, gold) |
-| `arsnova-engine.js` | Formant vocal + isorhythm synthesis engine (Web Audio API) |
+| `vocal-voices.js` | Shared library of interchangeable vocal-synthesis engines (FOF, formant, additive, vocal-tract) |
+| `arsnova-engine.js` | Isorhythm engine driving `vocal-voices.js` (sung voices) + FM instrumental tenor (Web Audio API) |
 | `app.js` | UI controller, isorhythmic-grid visualizer, gilt motes |
 | `arsnova_mobile.html` | Self-contained mobile version (single file) |
 
