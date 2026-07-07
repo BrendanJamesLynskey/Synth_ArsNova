@@ -39,7 +39,7 @@ A parallel, secular, vernacular branch runs alongside it: **Troubadour** song â†
 | App | Style | Synthesis technique |
 |---|---|---|
 | [Synth Gregorian](https://github.com/BrendanJamesLynskey/Synth_Gregorian) | Plainsong | Sourceâ€“filter formant vocal synthesis |
-| [Synth Organum](https://github.com/BrendanJamesLynskey/Synth_Organum) | Notre-Dame polyphony | Formant vocal polyphony in Pythagorean just intonation |
+| [Synth Organum](https://github.com/BrendanJamesLynskey/Synth_Organum) | Notre-Dame polyphony | FOF vocal synthesis in Pythagorean just intonation |
 | **Synth Ars Nova** (this) | 14th-c. isorhythm | Formant vocal synthesis (sung upper voices) with an isorhythmic *talea/color* engine over an instrumental tenor |
 | [Synth Troubadour](https://github.com/BrendanJamesLynskey/Synth_Troubadour) | Secular monophony | Formant vocal melody over a subtractive drone |
 | [Synth Estampie](https://github.com/BrendanJamesLynskey/Synth_Estampie) | Medieval dance | Physical modelling (instrumental dance) |
