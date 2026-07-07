@@ -1,0 +1,965 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title>Synth Ars Nova — Isorhythmic FM Synthesizer</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=UnifrakturMaguntia&family=Cinzel:wght@400;600;700&family=EB+Garamond:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
+    <style>
+/* === Synth Ars Nova — Styles (courtly Gothic: vermilion, royal purple, gold) === */
+
+:root {
+    --gold: #c8a84e;
+    --gold-bright: #f0d67a;
+    --gold-dark: #8b6914;
+    --accent: #6a1f4d;          /* royal purple rubric */
+    --accent-light: #9e4a8c;
+    --vermilion: #c62b3a;
+    --ink: #1a1020;
+    --ink-deep: #0d0812;
+    --panel-line: rgba(200, 168, 78, 0.22);
+    --parchment: #efe3c4;
+    --text-main: #e8d9b0;
+    --text-dim: #c0a6c4;
+    --bg-dark: #0d0812;
+    --bg-panel: rgba(26, 16, 32, 0.85);
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+    font-family: 'EB Garamond', 'Cormorant Garamond', Georgia, serif;
+    background: var(--bg-dark);
+    color: var(--text-main);
+    min-height: 100vh;
+    overflow-x: hidden;
+    position: relative;
+}
+
+body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background:
+        radial-gradient(ellipse at 50% 0%, rgba(158, 74, 140, 0.10) 0%, transparent 60%),
+        radial-gradient(ellipse at 50% 100%, rgba(198, 43, 58, 0.07) 0%, transparent 60%);
+    pointer-events: none;
+    z-index: 0;
+}
+
+/* Faint ruled-manuscript / tenor-grid texture */
+body::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+        url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='80' height='80' viewBox='0 0 80 80'%3E%3Cpath d='M0 20h80M0 34h80M0 48h80M0 62h80' stroke='%23c8a84e' stroke-width='0.3' opacity='0.05'/%3E%3C/svg%3E");
+    pointer-events: none;
+    z-index: 0;
+}
+
+.icon-border-top {
+    height: 6px;
+    background: linear-gradient(90deg, transparent 0%, var(--gold-dark) 15%, var(--gold-bright) 30%, var(--gold) 50%, var(--gold-bright) 70%, var(--gold-dark) 85%, transparent 100%);
+    position: relative;
+    z-index: 10;
+}
+.icon-border-top::after {
+    content: '';
+    display: block;
+    height: 2px;
+    margin-top: 2px;
+    background: linear-gradient(90deg, transparent 0%, var(--accent) 20%, var(--vermilion) 50%, var(--accent) 80%, transparent 100%);
+}
+
+/* Floating gilt motes */
+.incense-container { position: fixed; inset: 0; pointer-events: none; z-index: 1; overflow: hidden; }
+.smoke-particle {
+    position: absolute;
+    width: 4px; height: 4px;
+    background: radial-gradient(circle, rgba(240, 214, 122, 0.35), transparent);
+    border-radius: 50%;
+    animation: smokeRise linear forwards;
+}
+@keyframes smokeRise {
+    0% { opacity: 0; transform: translateY(0) translateX(0) scale(1); }
+    20% { opacity: 0.4; }
+    100% { opacity: 0; transform: translateY(-420px) translateX(var(--drift)) scale(7); }
+}
+
+header {
+    text-align: center;
+    padding: 2.5rem 1rem 1.2rem;
+    position: relative;
+    z-index: 5;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 1.4rem;
+    flex-wrap: wrap;
+}
+.cross-ornament { font-size: 1.9rem; color: var(--gold); text-shadow: 0 0 15px rgba(200, 168, 78, 0.5); line-height: 1; }
+.cross-ornament.small { font-size: 1.1rem; }
+
+h1 {
+    font-family: 'UnifrakturMaguntia', 'Cinzel', serif;
+    font-size: clamp(2rem, 5vw, 3.4rem);
+    font-weight: 400;
+    color: var(--gold-bright);
+    text-shadow: 0 0 20px rgba(240, 214, 122, 0.3), 0 2px 4px rgba(0, 0, 0, 0.5);
+    letter-spacing: 0.04em;
+}
+.subtitle {
+    font-family: 'Cinzel', serif;
+    font-size: 0.95rem;
+    color: var(--text-dim);
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    margin-top: 0.3rem;
+    flex-basis: 100%;
+}
+
+main { max-width: 860px; margin: 0 auto; padding: 0 1.5rem 3rem; position: relative; z-index: 5; }
+
+/* Illuminated-initial frame (inline SVG lives inside) */
+.icon-frame {
+    width: 230px;
+    margin: 0 auto 1.6rem;
+    padding: 12px;
+    background: linear-gradient(145deg, #33203a, #1a1020);
+    border: 4px solid var(--gold-dark);
+    border-radius: 8px;
+    box-shadow: 0 0 30px rgba(200, 168, 78, 0.15), inset 0 0 20px rgba(200, 168, 78, 0.05), 0 8px 32px rgba(0, 0, 0, 0.5);
+    position: relative;
+    cursor: pointer;
+    transition: box-shadow 0.5s ease, transform 0.3s ease;
+    overflow: hidden;
+}
+.icon-frame:hover { box-shadow: 0 0 50px rgba(200, 168, 78, 0.25), inset 0 0 30px rgba(200, 168, 78, 0.08), 0 8px 32px rgba(0, 0, 0, 0.5); transform: scale(1.02); }
+.icon-frame.active { box-shadow: 0 0 60px rgba(240, 214, 122, 0.35), inset 0 0 30px rgba(158, 74, 140, 0.15), 0 8px 32px rgba(0, 0, 0, 0.5); border-color: var(--gold-bright); }
+.icon-frame::before { content: ''; position: absolute; inset: 5px; border: 1px solid var(--gold-dark); border-radius: 4px; opacity: 0.5; pointer-events: none; z-index: 2; }
+.icon-frame svg { width: 100%; height: auto; display: block; position: relative; z-index: 1; }
+
+.controls-panel {
+    background: var(--bg-panel);
+    border: 1px solid var(--panel-line);
+    border-radius: 12px;
+    padding: 2rem;
+    margin-bottom: 1.6rem;
+    backdrop-filter: blur(10px);
+    box-shadow: 0 4px 30px rgba(0, 0, 0, 0.3);
+}
+
+.ornament-line { display: flex; align-items: center; gap: 0.5rem; margin: 1.1rem 0; }
+.ornament-dot { width: 6px; height: 6px; background: var(--gold); border-radius: 50%; flex-shrink: 0; }
+.ornament-rule { flex: 1; height: 1px; background: linear-gradient(90deg, transparent, var(--gold-dark), transparent); }
+.ornament-cross { color: var(--gold); font-size: 1rem; flex-shrink: 0; opacity: 0.7; }
+
+.transport { display: flex; justify-content: center; margin: 1.4rem 0; }
+.btn-chant {
+    font-family: 'Cinzel', serif;
+    font-size: 1.15rem;
+    font-weight: 600;
+    color: var(--parchment);
+    background: linear-gradient(145deg, var(--accent), #45123a);
+    border: 2px solid var(--gold-dark);
+    border-radius: 50px;
+    padding: 1rem 2.8rem;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    display: flex;
+    align-items: center;
+    gap: 0.7rem;
+    box-shadow: 0 4px 15px rgba(106, 31, 77, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+    letter-spacing: 0.05em;
+}
+.btn-chant:hover { background: linear-gradient(145deg, var(--accent-light), var(--accent)); border-color: var(--gold); box-shadow: 0 4px 20px rgba(106, 31, 77, 0.6), 0 0 20px rgba(200, 168, 78, 0.2); transform: translateY(-1px); }
+.btn-chant:active { transform: translateY(1px); }
+.btn-chant.playing { background: linear-gradient(145deg, #7a1f2a, #55131c); border-color: var(--gold-bright); animation: glowPulse 3s ease-in-out infinite; }
+@keyframes glowPulse {
+    0%, 100% { box-shadow: 0 4px 20px rgba(198, 43, 58, 0.4), 0 0 20px rgba(240, 214, 122, 0.1); }
+    50% { box-shadow: 0 4px 25px rgba(198, 43, 58, 0.6), 0 0 35px rgba(240, 214, 122, 0.25); }
+}
+.btn-icon { font-size: 1.3rem; }
+
+.control-label { display: block; font-family: 'Cinzel', serif; font-size: 0.82rem; color: var(--text-dim); letter-spacing: 0.1em; margin-bottom: 0.55rem; text-transform: uppercase; }
+.control-group { margin-bottom: 1.1rem; }
+
+.mode-selector { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+.mode-btn, .choir-btn {
+    font-family: 'Cinzel', serif;
+    font-size: 0.82rem;
+    color: var(--text-dim);
+    background: rgba(40, 24, 48, 0.6);
+    border: 1px solid var(--panel-line);
+    border-radius: 6px;
+    padding: 0.5rem 0.8rem;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    min-width: 46px;
+    text-align: center;
+}
+.mode-btn:hover, .choir-btn:hover { background: rgba(158, 74, 140, 0.15); border-color: var(--gold-dark); }
+.mode-btn.active, .choir-btn.active { color: var(--gold-bright); background: rgba(200, 168, 78, 0.15); border-color: var(--gold); box-shadow: 0 0 10px rgba(200, 168, 78, 0.15); }
+.mode-btn small { display: block; font-size: 0.62rem; letter-spacing: 0.03em; opacity: 0.75; margin-top: 2px; }
+
+.sliders-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem 2rem; }
+@media (max-width: 600px) { .sliders-grid { grid-template-columns: 1fr; } }
+
+.slider {
+    -webkit-appearance: none; appearance: none;
+    width: 100%; height: 6px;
+    background: linear-gradient(90deg, var(--ink-deep), #3a2440);
+    border-radius: 3px; outline: none;
+    border: 1px solid rgba(200, 168, 78, 0.15);
+}
+.slider::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 20px; height: 20px; background: radial-gradient(circle at 40% 40%, var(--gold-bright), var(--gold-dark)); border-radius: 50%; cursor: pointer; border: 2px solid var(--gold); box-shadow: 0 0 8px rgba(200, 168, 78, 0.3); }
+.slider::-webkit-slider-thumb:hover { box-shadow: 0 0 15px rgba(200, 168, 78, 0.5); }
+.slider::-moz-range-thumb { width: 20px; height: 20px; background: radial-gradient(circle at 40% 40%, var(--gold-bright), var(--gold-dark)); border-radius: 50%; cursor: pointer; border: 2px solid var(--gold); box-shadow: 0 0 8px rgba(200, 168, 78, 0.3); }
+
+.visualization-frame { background: var(--bg-panel); border: 1px solid var(--panel-line); border-radius: 12px; padding: 1rem; overflow: hidden; box-shadow: 0 4px 30px rgba(0, 0, 0, 0.3); margin-bottom: 1.6rem; }
+#vizCanvas { width: 100%; height: 160px; display: block; border-radius: 6px; }
+
+/* About-this-style panel */
+.about-panel {
+    background: var(--bg-panel);
+    border: 1px solid var(--panel-line);
+    border-radius: 12px;
+    padding: 1.8rem 2rem;
+    box-shadow: 0 4px 30px rgba(0, 0, 0, 0.3);
+    line-height: 1.65;
+}
+.about-panel h2 { font-family: 'Cinzel', serif; font-size: 1rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--gold-bright); margin-bottom: 0.4rem; }
+.about-panel .era { font-family: 'Cinzel', serif; font-size: 0.72rem; letter-spacing: 0.18em; text-transform: uppercase; color: var(--accent-light); margin-bottom: 1rem; }
+.about-panel p { color: var(--text-dim); font-size: 1.02rem; margin-bottom: 0.9rem; }
+.about-panel p:last-child { margin-bottom: 0; }
+.about-panel .drop { color: var(--gold-bright); font-weight: 600; }
+.lineage { margin-top: 1.2rem; padding-top: 1.1rem; border-top: 1px solid var(--panel-line); }
+.lineage h3 { font-family: 'Cinzel', serif; font-size: 0.78rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--text-dim); margin-bottom: 0.7rem; }
+.lineage-chain { display: flex; flex-wrap: wrap; gap: 0.35rem; align-items: center; font-family: 'Cinzel', serif; font-size: 0.72rem; letter-spacing: 0.04em; }
+.lineage-chain a, .lineage-chain span.node { color: var(--text-dim); text-decoration: none; padding: 0.3rem 0.6rem; border: 1px solid var(--panel-line); border-radius: 5px; transition: all 0.2s ease; white-space: nowrap; }
+.lineage-chain a:hover { color: var(--gold-bright); border-color: var(--gold); }
+.lineage-chain span.node.current { color: var(--ink); background: var(--gold); border-color: var(--gold); font-weight: 600; }
+.lineage-chain .arrow { color: var(--gold-dark); }
+
+footer { text-align: center; padding: 2rem 1rem 3rem; position: relative; z-index: 5; }
+footer p { font-family: 'Cinzel', serif; font-size: 0.85rem; color: var(--text-dim); letter-spacing: 0.15em; margin-top: 0.5rem; }
+footer .latin { font-family: 'EB Garamond', serif; font-style: italic; font-size: 0.85rem; color: var(--gold-dark); margin-top: 0.3rem; }
+
+::-webkit-scrollbar { width: 8px; }
+::-webkit-scrollbar-track { background: var(--bg-dark); }
+::-webkit-scrollbar-thumb { background: var(--gold-dark); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--gold); }
+::selection { background: rgba(158, 74, 140, 0.35); color: var(--parchment); }
+
+
+/* mobile safe areas */
+body { padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+.mode-btn, .choir-btn, .btn-chant { min-height: 44px; }
+.icon-frame { width: 180px; }
+main { padding-left: 1rem; padding-right: 1rem; }
+</style>
+</head>
+<body>
+    <div class="icon-border-top"></div>
+    <div class="incense-container" id="incenseContainer"></div>
+
+    <header>
+        <div class="cross-ornament">&#x2720;</div>
+        <h1>Synth Ars Nova</h1>
+        <p class="subtitle">Isorhythmic Motet &#8226; FM Synthesis</p>
+        <div class="cross-ornament">&#x2720;</div>
+    </header>
+
+    <main>
+        <!-- Illuminated initial -->
+        <div class="icon-frame" id="mainIcon">
+            <svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Illuminated initial A">
+                <defs>
+                    <linearGradient id="gold" x1="0" y1="0" x2="1" y2="1">
+                        <stop offset="0" stop-color="#f0d67a"/><stop offset="0.5" stop-color="#c8a84e"/><stop offset="1" stop-color="#8b6914"/>
+                    </linearGradient>
+                    <radialGradient id="halo" cx="0.5" cy="0.4" r="0.7">
+                        <stop offset="0" stop-color="#5a2a66"/><stop offset="1" stop-color="#2a1030"/>
+                    </radialGradient>
+                </defs>
+                <rect x="8" y="8" width="184" height="184" rx="6" fill="url(#halo)" stroke="#8b6914" stroke-width="2"/>
+                <rect x="16" y="16" width="168" height="168" rx="4" fill="none" stroke="#c62b3a" stroke-width="1.5" opacity="0.7"/>
+                <!-- vine flourishes -->
+                <path d="M28 30 q20 -14 44 -4 M172 30 q-20 -14 -44 -4 M28 170 q20 14 44 4 M172 170 q-20 14 -44 4" fill="none" stroke="#c8a84e" stroke-width="1.4" opacity="0.55"/>
+                <circle cx="30" cy="30" r="3.5" fill="#c62b3a"/><circle cx="170" cy="30" r="3.5" fill="#c62b3a"/>
+                <circle cx="30" cy="170" r="3.5" fill="#9e4a8c"/><circle cx="170" cy="170" r="3.5" fill="#9e4a8c"/>
+                <!-- initial A -->
+                <text x="100" y="140" text-anchor="middle" font-family="UnifrakturMaguntia, serif" font-size="150" fill="url(#gold)" stroke="#5a4408" stroke-width="1.2">A</text>
+                <!-- isorhythmic tenor grid with two taleae -->
+                <g opacity="0.8" stroke="#e8d9b0" stroke-width="1">
+                    <line x1="46" y1="60" x2="154" y2="60"/><line x1="46" y1="70" x2="154" y2="70"/><line x1="46" y1="80" x2="154" y2="80"/>
+                </g>
+                <rect x="70" y="66" width="8" height="8" fill="#2a1030" transform="rotate(45 74 70)"/>
+                <rect x="96" y="56" width="8" height="8" fill="#c62b3a" transform="rotate(45 100 60)"/>
+                <rect x="122" y="66" width="8" height="8" fill="#9e4a8c" transform="rotate(45 126 70)"/>
+            </svg>
+        </div>
+
+        <div class="controls-panel">
+            <div class="ornament-line"><span class="ornament-dot"></span><span class="ornament-rule"></span><span class="ornament-cross">&#x2720;</span><span class="ornament-rule"></span><span class="ornament-dot"></span></div>
+
+            <div class="transport">
+                <button class="btn-chant" id="btnChant" onclick="toggleChant()">
+                    <span class="btn-icon">&#x266A;</span>
+                    <span class="btn-text">Sound the Motet</span>
+                </button>
+            </div>
+
+            <!-- Church modes -->
+            <div class="control-group">
+                <label class="control-label">&#x2726; Mode (Church Tone)</label>
+                <div class="mode-selector">
+                    <button class="mode-btn active" data-mode="1" onclick="setMode(1)">I<small>Dorian</small></button>
+                    <button class="mode-btn" data-mode="2" onclick="setMode(2)">II<small>Hypodor.</small></button>
+                    <button class="mode-btn" data-mode="3" onclick="setMode(3)">III<small>Phrygian</small></button>
+                    <button class="mode-btn" data-mode="4" onclick="setMode(4)">IV<small>Hypophr.</small></button>
+                    <button class="mode-btn" data-mode="5" onclick="setMode(5)">V<small>Lydian</small></button>
+                    <button class="mode-btn" data-mode="6" onclick="setMode(6)">VI<small>Hypolyd.</small></button>
+                    <button class="mode-btn" data-mode="7" onclick="setMode(7)">VII<small>Mixolyd.</small></button>
+                    <button class="mode-btn" data-mode="8" onclick="setMode(8)">VIII<small>Hypomix.</small></button>
+                </div>
+            </div>
+
+            <div class="sliders-grid">
+                <div class="control-group"><label class="control-label">&#x2726; Voice</label><input type="range" class="slider" id="voiceVol" min="0" max="100" value="75" oninput="updateVoice()"></div>
+                <div class="control-group"><label class="control-label">&#x2726; FM Timbre</label><input type="range" class="slider" id="brightAmt" min="0" max="100" value="55" oninput="updateBright()"></div>
+                <div class="control-group"><label class="control-label">&#x2726; Hall Reverb</label><input type="range" class="slider" id="reverbMix" min="0" max="100" value="55" oninput="updateReverb()"></div>
+                <div class="control-group"><label class="control-label">&#x2726; Pace</label><input type="range" class="slider" id="tempoSlider" min="44" max="104" value="64" oninput="updateTempo()"></div>
+            </div>
+
+            <div class="control-group">
+                <label class="control-label">&#x2726; Ensemble</label>
+                <div class="mode-selector">
+                    <button class="choir-btn active" data-voices="2" onclick="setVoices(2)">Duet</button>
+                    <button class="choir-btn" data-voices="3" onclick="setVoices(3)">Trio</button>
+                    <button class="choir-btn" data-voices="4" onclick="setVoices(4)">Quatre</button>
+                </div>
+            </div>
+
+            <div class="ornament-line"><span class="ornament-dot"></span><span class="ornament-rule"></span><span class="ornament-cross">&#x2720;</span><span class="ornament-rule"></span><span class="ornament-dot"></span></div>
+        </div>
+
+        <div class="visualization-frame">
+            <canvas id="vizCanvas" width="800" height="200"></canvas>
+        </div>
+
+        <!-- About this style -->
+        <div class="about-panel">
+            <h2>About the Ars Nova</h2>
+            <div class="era">Mature Gothic polyphony &#8226; 14th century &#8226; France</div>
+            <p><span class="drop">T</span>he <em>Ars Nova</em> &mdash; the "new art" &mdash; takes its name from a treatise associated with <em>Philippe de Vitry</em> (c. 1322). It broke from the older <em>Ars Antiqua</em> by notating duple ("imperfect") time as the equal of triple, and by granting rhythm a freedom and precision it had never had. Its towering figure is <em>Guillaume de Machaut</em>, poet-composer of ballades, rondeaux, motets, and the first complete polyphonic setting of the Mass ordinary by one hand &mdash; the <em>Messe de Nostre&nbsp;Dame</em>.</p>
+            <p>Its signature device is <em>isorhythm</em>: a repeating rhythmic pattern &mdash; the <em>talea</em> &mdash; laid over a repeating series of pitches &mdash; the <em>color</em>. When the two are of different lengths they slip out of phase and realign only after many statements, generating vast, mathematically-scaffolded structures. This engine voices that scaffold with <em>FM synthesis</em>: reedy shawms, a rounder portative organ, and a medieval fiddle, each a true carrier&ndash;modulator pair.</p>
+            <div class="lineage">
+                <h3>Where it sits in the lineage</h3>
+                <p>The Ars Nova is the flowering of the polyphony first raised at Notre&nbsp;Dame. Plainsong gave the single line; <em>organum</em> added a second voice; the Ars Nova organised those voices into rhythmically independent parts over an isorhythmic tenor drawn from chant. From here the road runs on to the Renaissance. A parallel secular branch runs through the troubadours to instrumental dance.</p>
+                <div class="lineage-chain">
+                    <a href="https://brendanjameslynskey.github.io/Synth_Gregorian/">Plainsong</a>
+                    <span class="arrow">&rarr;</span>
+                    <a href="https://brendanjameslynskey.github.io/Synth_Organum/">Organum</a>
+                    <span class="arrow">&rarr;</span>
+                    <span class="node current">Ars Nova</span>
+                    <span class="arrow">&#8231;&#8231;&#8231;</span>
+                    <a href="https://brendanjameslynskey.github.io/Synth_Troubadour/">Troubadour</a>
+                    <span class="arrow">&rarr;</span>
+                    <a href="https://brendanjameslynskey.github.io/Synth_Estampie/">Estampie</a>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <footer>
+        <div class="cross-ornament small">&#x2720;</div>
+        <p>Ars Nova Musicae</p>
+        <p class="latin">The new art of music</p>
+    </footer>
+
+    <script>
+/**
+ * Ars Nova Synthesis Engine — FM (Frequency-Modulation) + Isorhythm
+ *
+ * The 14th-century French Ars Nova (Philippe de Vitry, Guillaume de Machaut)
+ * is voiced here with true FM synthesis rather than pure tones, to catch the
+ * reedy medieval winds and buzzy organ timbres of the age:
+ *
+ *   - CARRIER    : an OscillatorNode at the note pitch.
+ *   - MODULATOR  : a second oscillator whose output, scaled by a modGain, is
+ *                  wired into carrier.frequency. modGain.gain (in Hz) is the
+ *                  peak frequency deviation, i.e. the modulation index × the
+ *                  modulator frequency. A fast-decaying mod-index envelope
+ *                  gives the reedy, double-reed attack.
+ *   - RATIO      : carrier:modulator frequency ratio sets the timbre family
+ *                  (shawm/bombarde, portative organ, medieval fiddle).
+ *
+ * On top of that sits the defining Ars Nova innovation: the ISORHYTHM. A
+ * repeating rhythmic pattern (the TALEA — an array of durations) is laid over
+ * a repeating pitch series (the COLOR — an array of scale degrees). Because
+ * talea.length ≠ color.length, the two cycle out of phase and only realign
+ * after LCM(talea, color) iterations. The tenor is driven isorhythmically;
+ * faster cantus / contratenor / triplum voices weave above it, all tuned to
+ * one of the 8 church modes and washed in a large hall convolution reverb.
+ */
+
+class ArsNovaEngine {
+    constructor() {
+        this.ctx = null;
+        this.isPlaying = false;
+        this.currentMode = 1;
+        this.numVoices = 2;             // Tenor + Cantus by default
+        this.tempo = 64;                // tactus (upper-voice) beats per minute
+        this.voiceVolume = 0.75;
+        this.brightness = 0.55;         // global FM modulation-index scaler
+        this.reverbMix = 0.55;
+
+        this.parts = [];                // active FM voices (tenor + upper voices)
+        this.stepTimeout = null;
+        this.activeNotes = [];
+
+        this.masterGain = null;
+        this.voiceBus = null;
+        this.reverbGain = null;
+        this.dryGain = null;
+        this.convolver = null;
+        this.analyser = null;
+
+        // Tenor sits low; upper voices are lifted an octave.
+        this.basePitch = 146.83;        // D3
+
+        // Isorhythmic tenor is slower than the tactus.
+        this.tenorScale = 1.7;
+
+        // === The 8 medieval church modes (pitch collection) ===
+        // intervals: cents from the finalis; tenor: reciting-tone scale degree.
+        this.modes = {
+            1: { name: "Dorian",        intervals: [0,200,300,500,700,900,1000,1200], finalis: 0, tenor: 4, up: 5 },
+            2: { name: "Hypodorian",    intervals: [0,200,300,500,700,900,1000,1200], finalis: 0, tenor: 2, up: 4 },
+            3: { name: "Phrygian",      intervals: [0,100,300,500,700,800,1000,1200], finalis: 0, tenor: 5, up: 6 },
+            4: { name: "Hypophrygian",  intervals: [0,100,300,500,700,800,1000,1200], finalis: 0, tenor: 3, up: 5 },
+            5: { name: "Lydian",        intervals: [0,200,400,600,700,900,1100,1200], finalis: 0, tenor: 4, up: 6 },
+            6: { name: "Hypolydian",    intervals: [0,200,400,600,700,900,1100,1200], finalis: 0, tenor: 2, up: 4 },
+            7: { name: "Mixolydian",    intervals: [0,200,400,500,700,900,1000,1200], finalis: 0, tenor: 4, up: 6 },
+            8: { name: "Hypomixolydian",intervals: [0,200,400,500,700,900,1000,1200], finalis: 0, tenor: 3, up: 5 }
+        };
+
+        // === FM voice presets (carrier:modulator ratio + base mod index) ===
+        this.presets = {
+            organ:  { ratio: 1.0, index: 2.6, wave: 'sine'     },  // portative organ — rounder
+            fiddle: { ratio: 1.5, index: 4.4, wave: 'sine'     },  // medieval fiddle / cantus
+            shawm:  { ratio: 2.5, index: 8.5, wave: 'sawtooth' },  // shawm / bombarde — bright buzzy double reed
+            triplum:{ ratio: 2.0, index: 6.2, wave: 'sine'     }   // upper shawm/fiddle blend
+        };
+
+        // === Talea / Color pairs (isorhythm) ===
+        // talea.length ≠ color.length so they precess; realign after LCM.
+        this.taleae = [
+            { talea: [3, 2, 2, 1, 2], color: [0, 2, 3, 4, 2, 1, 0] },   // 5 vs 7  → LCM 35
+            { talea: [2, 2, 3, 1],    color: [0, 4, 3, 5, 2, 4, 0] }    // 4 vs 7  → LCM 28
+        ];
+        this.taleaIndex = 0;
+        this.taleaPos = 0;
+        this.colorPos = 0;
+    }
+
+    async init() {
+        if (this.ctx) return;
+        this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+
+        this.masterGain = this.ctx.createGain();
+        this.masterGain.gain.value = 0.85;
+        this.masterGain.connect(this.ctx.destination);
+
+        this.analyser = this.ctx.createAnalyser();
+        this.analyser.fftSize = 2048;
+        this.analyser.smoothingTimeConstant = 0.85;
+        this.masterGain.connect(this.analyser);
+
+        await this.createReverb();
+
+        this.voiceBus = this.ctx.createGain();
+        this.voiceBus.gain.value = this.voiceVolume;
+
+        this.dryGain = this.ctx.createGain();
+        this.dryGain.gain.value = 1 - this.reverbMix * 0.5;
+
+        this.reverbGain = this.ctx.createGain();
+        this.reverbGain.gain.value = this.reverbMix;
+
+        this.voiceBus.connect(this.dryGain);
+        this.voiceBus.connect(this.convolver);
+        this.dryGain.connect(this.masterGain);
+        this.convolver.connect(this.reverbGain);
+        this.reverbGain.connect(this.masterGain);
+    }
+
+    /** Large gothic hall — ~6 s tail with sparse early reflections. */
+    async createReverb() {
+        const sr = this.ctx.sampleRate;
+        const length = Math.floor(sr * 6);
+        const impulse = this.ctx.createBuffer(2, length, sr);
+        const reflections = [0.013, 0.027, 0.041, 0.059, 0.078, 0.101, 0.129, 0.161, 0.197];
+        for (let ch = 0; ch < 2; ch++) {
+            const data = impulse.getChannelData(ch);
+            for (let i = 0; i < length; i++) {
+                const t = i / sr;
+                const env = Math.exp(-t * 0.6) * 0.35 + Math.exp(-t * 0.28) * 0.4 + Math.exp(-t * 0.13) * 0.22;
+                data[i] = (Math.random() * 2 - 1) * env;
+                if (i < sr * 0.22) {
+                    for (const d of reflections) {
+                        if (i === Math.floor(d * sr)) data[i] += (Math.random() * 2 - 1) * 0.3;
+                    }
+                }
+            }
+        }
+        this.convolver = this.ctx.createConvolver();
+        this.convolver.buffer = impulse;
+    }
+
+    centsToFreq(cents) { return this.basePitch * Math.pow(2, cents / 1200); }
+
+    /** Scale degree (may wrap) + explicit octave → frequency. */
+    degToFreq(deg, octave) {
+        const m = this.modes[this.currentMode];
+        const idx = ((deg % 8) + 8) % 8;
+        const oct = Math.floor(deg / 8) + (octave || 0);
+        return this.centsToFreq(m.intervals[idx]) * Math.pow(2, oct);
+    }
+
+    /**
+     * Build one ensemble part: an FM voice with its own fade-in bus.
+     *   role: label · preset: FM timbre · octave: register lift ·
+     *   vol: mix level · density: notes per tactus beat (0 = isorhythmic tenor).
+     */
+    createPart(role, presetName, octave, vol, density, index) {
+        const now = this.ctx.currentTime;
+        const busGain = this.ctx.createGain();
+        busGain.gain.setValueAtTime(0, now);
+        busGain.gain.linearRampToValueAtTime(vol, now + 1.2 + index * 0.5);
+        busGain.connect(this.voiceBus);
+
+        // Per-part fixed detune so the ensemble is a living, slightly-out choir.
+        const detuneCents = (index - 1.5) * 6 + (Math.random() - 0.5) * 4;
+
+        return {
+            role, preset: this.presets[presetName], octave, vol, density,
+            busGain, detuneCents,
+            mel: this.modes[this.currentMode].tenor    // upper-voice melodic pointer
+        };
+    }
+
+    setupVoices() {
+        this.teardownVoices();
+        // Additive layering: 2 = Tenor+Cantus, 3 = +Contratenor, 4 = +Triplum.
+        const layout = [
+            { role: 'tenor',   preset: 'organ',   octave: 0, vol: 0.50, density: 0   },
+            { role: 'cantus',  preset: 'fiddle',  octave: 1, vol: 0.34, density: 2.2 },
+            { role: 'contra',  preset: 'shawm',   octave: 0, vol: 0.28, density: 1.4 },
+            { role: 'triplum', preset: 'triplum', octave: 1, vol: 0.24, density: 3.0 }
+        ];
+        for (let i = 0; i < this.numVoices; i++) {
+            const p = layout[i];
+            this.parts.push(this.createPart(p.role, p.preset, p.octave, p.vol, p.density, i));
+        }
+    }
+
+    teardownVoices() {
+        const now = this.ctx ? this.ctx.currentTime : 0;
+        for (const part of this.parts) {
+            try {
+                part.busGain.gain.cancelScheduledValues(now);
+                part.busGain.gain.setValueAtTime(part.busGain.gain.value, now);
+                part.busGain.gain.linearRampToValueAtTime(0, now + 1.6);
+            } catch (e) {}
+        }
+        this.parts = [];
+    }
+
+    // === The isorhythmic engine ===
+
+    start() {
+        this.isPlaying = true;
+        this.taleaPos = 0;
+        this.colorPos = 0;
+        this.scheduleTenorNote();
+    }
+
+    stop() {
+        this.isPlaying = false;
+        if (this.stepTimeout) { clearTimeout(this.stepTimeout); this.stepTimeout = null; }
+        const now = this.ctx ? this.ctx.currentTime : 0;
+        for (const n of this.activeNotes) {
+            try {
+                n.amp.gain.cancelScheduledValues(now);
+                n.amp.gain.setValueAtTime(n.amp.gain.value, now);
+                n.amp.gain.linearRampToValueAtTime(0, now + 0.8);
+                setTimeout(() => { try { n.carrier.stop(); n.mod.stop(); } catch (e) {} }, 1000);
+            } catch (e) {}
+        }
+        this.activeNotes = [];
+        this.teardownVoices();
+    }
+
+    /**
+     * One tenor talea-step. The tenor takes its duration from the talea and its
+     * pitch from the color; the two arrays advance independently and precess.
+     * Faster upper voices are then woven across the same span.
+     */
+    scheduleTenorNote() {
+        if (!this.isPlaying || !this.parts.length) return;
+        const pair = this.taleae[this.taleaIndex];
+        const talea = pair.talea;
+        const color = pair.color;
+        const beat = 60 / this.tempo;
+
+        const durBeats = talea[this.taleaPos];
+        const tenorDur = durBeats * beat * this.tenorScale;
+        const tenorDeg = color[this.colorPos];
+
+        const tenor = this.parts[0];
+        if (tenor && tenor.role === 'tenor') {
+            const freq = this.degToFreq(tenorDeg, tenor.octave);
+            this.playFMNote(tenor, freq, tenorDur * 0.96, 0);
+        }
+
+        // Upper voices: subdivide the tenor span into faster, stepwise figures.
+        for (let v = 1; v < this.parts.length; v++) {
+            const part = this.parts[v];
+            const count = Math.max(2, Math.round(durBeats * part.density));
+            const sub = tenorDur / count;
+            for (let i = 0; i < count; i++) {
+                // Random walk mostly by step, kept within a modal range.
+                const step = Math.round((Math.random() - 0.5) * 3.2);
+                part.mel += step;
+                if (part.mel > 9) part.mel -= 3;
+                if (part.mel < 1) part.mel += 3;
+                const freq = this.degToFreq(part.mel, part.octave);
+                this.playFMNote(part, freq, sub * 0.9, i * sub);
+            }
+        }
+
+        // Advance talea and color independently — the heart of isorhythm.
+        this.taleaPos = (this.taleaPos + 1) % talea.length;
+        this.colorPos++;
+        if (this.colorPos >= color.length) {
+            this.colorPos = 0;
+            // On each full color, switch talea/color pair for long-form variety.
+            this.taleaIndex = (this.taleaIndex + 1) % this.taleae.length;
+            this.taleaPos = this.taleaPos % this.taleae[this.taleaIndex].talea.length;
+        }
+
+        this.stepTimeout = setTimeout(() => this.scheduleTenorNote(), tenorDur * 1000);
+    }
+
+    /**
+     * One true FM note: carrier + modulator + enveloped modulation index,
+     * amplitude ADSR, subtle vibrato, and per-note detune jitter.
+     */
+    playFMNote(part, freq, duration, delay) {
+        if (!isFinite(freq) || freq <= 0 || !isFinite(duration) || duration <= 0) return;
+        const t0 = this.ctx.currentTime + (delay || 0);
+        const p = part.preset;
+        const jitter = (Math.random() - 0.5) * 7;
+        const detune = part.detuneCents + jitter;
+
+        // --- Carrier ---
+        const carrier = this.ctx.createOscillator();
+        carrier.type = 'sine';
+        carrier.frequency.value = freq;
+        carrier.detune.value = detune;
+
+        // --- Modulator ---
+        const modFreq = freq * p.ratio;
+        const mod = this.ctx.createOscillator();
+        mod.type = p.wave;
+        mod.frequency.value = modFreq;
+        mod.detune.value = detune;
+
+        // --- Modulation-index envelope (peak deviation, Hz) ---
+        // index scaled globally by brightness → 0.4 … 1.7×
+        const bright = 0.4 + this.brightness * 1.3;
+        const peakDev = p.index * modFreq * bright;
+        const modGain = this.ctx.createGain();
+        const atk = Math.min(0.02, duration * 0.2);
+        const dec = Math.min(0.22, duration * 0.6);
+        modGain.gain.setValueAtTime(Math.max(1, peakDev * 0.35), t0);
+        modGain.gain.linearRampToValueAtTime(peakDev * 2.1, t0 + atk);           // reedy attack burst
+        modGain.gain.exponentialRampToValueAtTime(Math.max(1, peakDev * 0.55), t0 + atk + dec);
+        modGain.gain.exponentialRampToValueAtTime(Math.max(1, peakDev * 0.3), t0 + duration);
+        mod.connect(modGain);
+        modGain.connect(carrier.frequency);
+
+        // --- Amplitude ADSR ---
+        const amp = this.ctx.createGain();
+        const a = Math.min(0.03, duration * 0.25);
+        const r = Math.max(0.12, duration * 0.5);
+        amp.gain.setValueAtTime(0, t0);
+        amp.gain.linearRampToValueAtTime(1.0, t0 + a);
+        amp.gain.setValueAtTime(0.85, t0 + Math.max(a, duration * 0.55));
+        amp.gain.exponentialRampToValueAtTime(0.001, t0 + duration + r);
+        carrier.connect(amp);
+        amp.connect(part.busGain);
+
+        // --- Vibrato on held notes ---
+        let vib = null;
+        if (duration > 0.5) {
+            vib = this.ctx.createOscillator();
+            vib.type = 'sine';
+            vib.frequency.value = 5.0 + Math.random() * 1.4;
+            const vibDepth = this.ctx.createGain();
+            vibDepth.gain.value = freq * 0.005;
+            vib.connect(vibDepth); vibDepth.connect(carrier.frequency);
+            vib.start(t0 + a); vib.stop(t0 + duration + r);
+        }
+
+        carrier.start(t0); mod.start(t0);
+        const stopAt = t0 + duration + r + 0.1;
+        carrier.stop(stopAt); mod.stop(stopAt);
+
+        const node = { carrier, mod, amp };
+        this.activeNotes.push(node);
+        setTimeout(() => {
+            const idx = this.activeNotes.indexOf(node);
+            if (idx > -1) this.activeNotes.splice(idx, 1);
+        }, (delay + duration + r + 0.2) * 1000);
+    }
+
+    // === Public transport / control ===
+
+    async begin() {
+        await this.init();
+        if (this.ctx.state === 'suspended') await this.ctx.resume();
+        this.setupVoices();
+        setTimeout(() => { if (!this.isPlaying) this.start(); }, 1300);
+    }
+
+    end() { this.stop(); }
+
+    setMode(mode) {
+        this.currentMode = mode;
+        for (const part of this.parts) part.mel = this.modes[mode].tenor;
+    }
+
+    setVoices(count) {
+        this.numVoices = count;
+        if (this.parts.length) { this.setupVoices(); }
+    }
+
+    setVoiceVolume(v) {
+        this.voiceVolume = v;
+        if (this.voiceBus) this.voiceBus.gain.linearRampToValueAtTime(v, this.ctx.currentTime + 0.2);
+    }
+
+    /** FM Brightness / Timbre → global modulation-index scaling. */
+    setBrightness(v) { this.brightness = v; }
+
+    setReverbMix(v) {
+        this.reverbMix = v;
+        if (this.reverbGain && this.dryGain) {
+            const now = this.ctx.currentTime;
+            this.reverbGain.gain.linearRampToValueAtTime(v, now + 0.2);
+            this.dryGain.gain.linearRampToValueAtTime(1 - v * 0.5, now + 0.2);
+        }
+    }
+
+    setTempo(bpm) { this.tempo = bpm; }
+
+    getAnalyserData() {
+        if (!this.analyser) return null;
+        const d = new Uint8Array(this.analyser.frequencyBinCount);
+        this.analyser.getByteTimeDomainData(d);
+        return d;
+    }
+    getFrequencyData() {
+        if (!this.analyser) return null;
+        const d = new Uint8Array(this.analyser.frequencyBinCount);
+        this.analyser.getByteFrequencyData(d);
+        return d;
+    }
+}
+
+</script>
+    <script>
+/**
+ * Synth Ars Nova — UI Controller
+ */
+
+const engine = new ArsNovaEngine();
+let animationId = null;
+let isChanting = false;
+
+// === Transport ===
+
+async function toggleChant() {
+    const btn = document.getElementById('btnChant');
+    const icon = document.getElementById('mainIcon');
+
+    if (!isChanting) {
+        await engine.begin();
+        isChanting = true;
+        btn.classList.add('playing');
+        btn.querySelector('.btn-text').textContent = 'Silence';
+        btn.querySelector('.btn-icon').textContent = '■';
+        icon.classList.add('active');
+        startVisualization();
+        startMotes();
+    } else {
+        engine.end();
+        isChanting = false;
+        btn.classList.remove('playing');
+        btn.querySelector('.btn-text').textContent = 'Sound the Motet';
+        btn.querySelector('.btn-icon').textContent = '♪';
+        icon.classList.remove('active');
+        stopVisualization();
+    }
+}
+
+// === Controls ===
+
+function setMode(mode) {
+    document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
+    document.querySelector(`.mode-btn[data-mode="${mode}"]`).classList.add('active');
+    engine.setMode(mode);
+}
+
+function setVoices(count) {
+    document.querySelectorAll('.choir-btn').forEach(b => b.classList.remove('active'));
+    document.querySelector(`.choir-btn[data-voices="${count}"]`).classList.add('active');
+    engine.setVoices(count);
+}
+
+function updateVoice() { engine.setVoiceVolume(document.getElementById('voiceVol').value / 100); }
+function updateBright() { engine.setBrightness(document.getElementById('brightAmt').value / 100); }
+function updateReverb() { engine.setReverbMix(document.getElementById('reverbMix').value / 100); }
+function updateTempo() { engine.setTempo(parseInt(document.getElementById('tempoSlider').value)); }
+
+// === Visualization: an isorhythmic grid of gilded light ===
+
+function startVisualization() {
+    const canvas = document.getElementById('vizCanvas');
+    const ctx = canvas.getContext('2d');
+    canvas.width = canvas.offsetWidth * window.devicePixelRatio;
+    canvas.height = canvas.offsetHeight * window.devicePixelRatio;
+    ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+    const width = canvas.offsetWidth;
+    const height = canvas.offsetHeight;
+
+    function draw() {
+        animationId = requestAnimationFrame(draw);
+        const waveData = engine.getAnalyserData();
+        const freqData = engine.getFrequencyData();
+        if (!waveData || !freqData) return;
+
+        ctx.fillStyle = 'rgba(13, 8, 18, 0.3)';
+        ctx.fillRect(0, 0, width, height);
+
+        // Four faint tenor-grid lines (the isorhythmic scaffold)
+        ctx.strokeStyle = 'rgba(200, 168, 78, 0.12)';
+        ctx.lineWidth = 1;
+        for (let l = 1; l <= 4; l++) {
+            const y = height * (0.25 + l * 0.11);
+            ctx.beginPath(); ctx.moveTo(20, y); ctx.lineTo(width - 20, y); ctx.stroke();
+        }
+
+        // Frequency bars as gilded gothic tracery
+        const barCount = 72;
+        const barWidth = width / barCount;
+        const freqStep = Math.floor(freqData.length / barCount);
+        for (let i = 0; i < barCount; i++) {
+            const value = freqData[i * freqStep] / 255;
+            const barHeight = value * height * 0.7;
+            const x = i * barWidth;
+            const g = ctx.createLinearGradient(x, height, x, height - barHeight);
+            g.addColorStop(0, `rgba(200, 168, 78, ${0.1 + value * 0.4})`);
+            g.addColorStop(0.5, `rgba(158, 74, 140, ${value * 0.4})`);
+            g.addColorStop(1, `rgba(198, 43, 58, ${value * 0.3})`);
+            ctx.fillStyle = g;
+            ctx.fillRect(x + 1, height - barHeight, barWidth - 2, barHeight);
+        }
+
+        // Flowing waveform — the melisma of the upper voices
+        ctx.beginPath();
+        ctx.strokeStyle = 'rgba(240, 214, 122, 0.6)';
+        ctx.lineWidth = 1.5;
+        const slice = width / waveData.length;
+        let x = 0;
+        for (let i = 0; i < waveData.length; i++) {
+            const v = waveData[i] / 128.0;
+            const y = (v * height) / 2;
+            i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+            x += slice;
+        }
+        ctx.stroke();
+    }
+    draw();
+}
+
+function stopVisualization() {
+    if (animationId) { cancelAnimationFrame(animationId); animationId = null; }
+    const canvas = document.getElementById('vizCanvas');
+    const ctx = canvas.getContext('2d');
+    const width = canvas.offsetWidth, height = canvas.offsetHeight;
+    let alpha = 1;
+    function fade() {
+        ctx.fillStyle = 'rgba(13, 8, 18, 0.05)';
+        ctx.fillRect(0, 0, width, height);
+        alpha -= 0.02;
+        if (alpha > 0) requestAnimationFrame(fade);
+    }
+    fade();
+}
+
+// === Floating gilt motes ===
+
+let motesInterval = null;
+function startMotes() {
+    const container = document.getElementById('incenseContainer');
+    if (motesInterval) return;
+    motesInterval = setInterval(() => {
+        if (!isChanting) return;
+        const p = document.createElement('div');
+        p.className = 'smoke-particle';
+        p.style.left = (30 + Math.random() * (window.innerWidth - 60)) + 'px';
+        p.style.bottom = '0px';
+        p.style.setProperty('--drift', ((Math.random() - 0.5) * 90) + 'px');
+        const dur = 7 + Math.random() * 8;
+        p.style.animationDuration = dur + 's';
+        const s = 3 + Math.random() * 4;
+        p.style.width = s + 'px'; p.style.height = s + 'px';
+        container.appendChild(p);
+        setTimeout(() => p.remove(), dur * 1000);
+    }, 340);
+}
+
+window.addEventListener('resize', () => { if (isChanting) { stopVisualization(); startVisualization(); } });
+
+window.addEventListener('DOMContentLoaded', () => {
+    const canvas = document.getElementById('vizCanvas');
+    const ctx = canvas.getContext('2d');
+    canvas.width = canvas.offsetWidth * window.devicePixelRatio;
+    canvas.height = canvas.offsetHeight * window.devicePixelRatio;
+    ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+    ctx.fillStyle = 'rgba(13, 8, 18, 1)';
+    ctx.fillRect(0, 0, canvas.offsetWidth, canvas.offsetHeight);
+    ctx.strokeStyle = 'rgba(200, 168, 78, 0.12)';
+    ctx.lineWidth = 1;
+    for (let l = 1; l <= 4; l++) {
+        const y = canvas.offsetHeight * (0.25 + l * 0.11);
+        ctx.beginPath(); ctx.moveTo(20, y); ctx.lineTo(canvas.offsetWidth - 20, y); ctx.stroke();
+    }
+    ctx.font = '14px Cinzel, serif';
+    ctx.fillStyle = 'rgba(200, 168, 78, 0.35)';
+    ctx.textAlign = 'center';
+    ctx.fillText('Press "Sound the Motet" to begin', canvas.offsetWidth / 2, canvas.offsetHeight / 2 + 4);
+});
+
+</script>
+</body>
+</html>
