@@ -20,13 +20,16 @@
  *   - TENOR (instr) : a restrained FM tone (a mellow bowed/reed/organ colour) on
  *                     long sustained notes — the grounding cantus firmus.
  *
- * On top of that sits the defining Ars Nova innovation: the ISORHYTHM. A
- * repeating rhythmic pattern (the TALEA — an array of durations) is laid over
- * a repeating pitch series (the COLOR — an array of scale degrees). Because
- * talea.length ≠ color.length, the two cycle out of phase and only realign
- * after LCM(talea, color) iterations. The tenor is driven isorhythmically;
- * the sung upper voices weave above it, all tuned to one of the 8 church modes
- * and washed in a large chapel/hall convolution reverb.
+ * On top of that sits the defining Ars Nova innovation: the ISORHYTHM — and
+ * here it is the REAL thing: the tenor of Kyrie I from Machaut's Messe de
+ * Nostre Dame (Dorian, final D). A 4-note TALEA (durations 3·1·2·3 semibreves,
+ * closed by a 3-semibreve tenor REST) is laid over a 28-note COLOR; 28/4 = 7,
+ * so exactly seven taleae state the whole color, the last omitting its rest to
+ * end on the Dorian final D. The sung triplum and motetus move 4–8 attacks per
+ * tenor attack (the Ars Nova speed stratification), land OPEN 5th+octave
+ * sonorities at every talea cadence, hocket briefly in the last talea, close
+ * with the DOUBLE LEADING-TONE cadence (C#→D over G#→A), then restate the
+ * color in DIMINUTION — all washed in a large chapel convolution reverb.
  */
 
 class ArsNovaEngine {
@@ -55,8 +58,8 @@ class ArsNovaEngine {
         // Tenor sits low; upper voices are lifted an octave.
         this.basePitch = 146.83;        // D3
 
-        // Isorhythmic tenor is slower than the tactus.
-        this.tenorScale = 1.7;
+        // One semibreve (the tenor's counting unit) = 30/tempo seconds —
+        // ≈ 0.47 s at the default tactus, so tenor notes run ~0.5–1.4 s.
 
         // === The 8 medieval church modes (pitch collection) ===
         // intervals: cents from the finalis; tenor: reciting-tone scale degree.
@@ -84,15 +87,45 @@ class ArsNovaEngine {
             u: [350,  600, 2700, 3300]
         };
 
-        // === Talea / Color pairs (isorhythm) ===
-        // talea.length ≠ color.length so they precess; realign after LCM.
-        this.taleae = [
-            { talea: [3, 2, 2, 1, 2], color: [0, 2, 3, 4, 2, 1, 0] },   // 5 vs 7  → LCM 35
-            { talea: [2, 2, 3, 1],    color: [0, 4, 3, 5, 2, 4, 0] }    // 4 vs 7  → LCM 28
+        // === The isorhythm: Machaut, Messe de Nostre Dame — Kyrie I tenor ===
+        // The authentic tenor (Dorian, final D), machine-extracted from the
+        // public-domain score. TALEA: 4 durations in semibreves, then a
+        // 3-semibreve tenor REST — that periodic tenor silence is diagnostic
+        // and must be audible. COLOR: 28 pitches as diatonic steps above the
+        // finalis (0=D3 1=E3 2=F3 3=G3 4=A3 5=B3 6=C4). Model:
+        // pitch[i] = color[i mod 28], duration[i] = talea[i mod 4]; 28/4 = 7,
+        // so exactly seven taleae realign the cycle; the 7th omits its closing
+        // rest and ends on the Dorian final, D3.
+        this.talea = [3, 1, 2, 3];       // durations, in semibreves
+        this.taleaRestBeats = 3;         // tenor rest closing every talea but the last
+        this.color = [
+            4, 4, 3, 4,     // A  A  G  A
+            6, 5, 4, 3,     // C' B  A  G
+            4, 4, 3, 2,     // A  A  G  F
+            0, 2, 1, 3,     // D  F  E  G
+            4, 0, 1, 3,     // A  D  E  G
+            3, 2, 1, 0,     // G  F  E  D
+            1, 2, 1, 0      // E  F  E  D   ← ends on the Dorian final
         ];
-        this.taleaIndex = 0;
-        this.taleaPos = 0;
-        this.colorPos = 0;
+        this.tenorIndex = 0;             // 0..27 through the color
+        this.inRest = false;             // true while a talea's closing tenor rest sounds
+        this.pass = 0;                   // 0 = integer statement · 1 = diminution (talea halved)
+
+        // Upper-voice line configs by part index (1..3). Ranges are absolute
+        // diatonic steps above D3 (7 per octave): the triplum lives D4–E5 in
+        // the treble band of the sampled voice bank (voice:'auto'), the
+        // motetus G3–B4 in the male band. `fast` voices move at the minim
+        // with semiminim ornaments and syncopation — 4–8 attacks per tenor
+        // attack, the Ars Nova speed stratification. Cadence fields: finalStep
+        // is the closing D–A–D tone; penStep(+penCents) the leading tone of
+        // the double-leading-tone cadence (C#5 / G#4, raised 100 cents);
+        // preStep the 7-6 / 4-3 suspension sounded just before it.
+        this.upperRoles = [
+            null,
+            { name: 'triplum',  lo: 7, hi: 15, fast: true,  finalStep: 14, penStep: 13, penCents: 100, preStep: 14 },
+            { name: 'motetus',  lo: 3, hi: 12, fast: false, finalStep: 11, penStep: 10, penCents: 100, preStep: 11 },
+            { name: 'triplum2', lo: 7, hi: 13, fast: true,  finalStep: 7,  penStep: 8,  penCents: 0,   preStep: 8  }
+        ];
     }
 
     async init() {
@@ -267,12 +300,171 @@ class ArsNovaEngine {
         part.vowel = vowel;
     }
 
-    // === The isorhythmic engine ===
+    // === The isorhythmic engine — Machaut, Kyrie I (Messe de Nostre Dame) ===
+
+    /**
+     * Diatonic step above the finalis (7 per octave, may exceed/undershoot)
+     * + explicit octave + optional accidental (cents) → frequency.
+     * Step 0 = D3 in mode 1; +100 cents raises a leading tone (C#, G#).
+     */
+    noteFreq(step, octave, accCents) {
+        const m = this.modes[this.currentMode];
+        const idx = ((step % 7) + 7) % 7;
+        const oct = Math.floor(step / 7) + (octave || 0);
+        return this.centsToFreq(m.intervals[idx] + (accCents || 0)) * Math.pow(2, oct);
+    }
+
+    clampStep(s, role) { return Math.max(role.lo, Math.min(role.hi, s)); }
+
+    /**
+     * Nearest consonance with the tenor within the role's range; moves
+     * part.step. Intervals are diatonic steps above the tenor — perfect:
+     * unison/5th/8ve/12th/15th; imperfect adds 3rds/6ths (and 4ths, usable
+     * above the tenor in Ars Nova practice).
+     */
+    pickConsonant(part, role, tenorStep, perfectOnly) {
+        const ivs = perfectOnly ? [0, 4, 7, 11, 14]
+                                : [0, 2, 3, 4, 5, 7, 9, 10, 11, 12, 14];
+        let best = this.clampStep(part.step, role);
+        let bestCost = Infinity;
+        for (const iv of ivs) {
+            const cand = tenorStep + iv;
+            if (cand < role.lo || cand > role.hi) continue;
+            let cost = Math.abs(cand - part.step) + Math.random() * 0.8;
+            if (cand === part.step) cost += 0.6;          // keep the line moving
+            if (cost < bestCost) { bestCost = cost; best = cand; }
+        }
+        part.step = best;
+        return best;
+    }
+
+    /** One stepwise passing/neighbour move, kept inside the role's range. */
+    stepwise(part, role) {
+        let dir = Math.random() < 0.5 ? -1 : 1;
+        if (part.step <= role.lo) dir = 1;
+        else if (part.step >= role.hi) dir = -1;
+        else if (Math.random() < 0.35) {
+            dir = part.step > (role.lo + role.hi) / 2 ? -1 : 1;   // lean back toward mid-range
+        }
+        part.step += dir;
+        return part.step;
+    }
+
+    /**
+     * Compose one sung part's notes for a tenor span, on a minim grid:
+     * returns [{ step, at (minims), len (minims), cents }].
+     *
+     *  - final:   hold the open D–A–D sonority for the whole span.
+     *  - penult:  the DOUBLE LEADING-TONE cadence — one anticipatory minim
+     *             (a 7-6 / 4-3 suspension over the tenor's E), then C#5 in the
+     *             triplum and G#4 in the motetus held to resolve D5 / A4.
+     *  - cadence: land an OPEN perfect sonority (unison/5th/8ve, no third) on
+     *             the tenor pitch at every talea boundary and hold it.
+     *  - hocket:  triplum and motetus alternate note/rest at the minim.
+     *  - else:    free counterpoint — consonances on strong minims (semibreve
+     *             starts), stepwise passing tones between, with occasional
+     *             SYNCOPATION (a weak minim seizing the consonance and holding
+     *             it across the beat) and semiminim ornament pairs.
+     */
+    composeLine(part, role, vIndex, spanMin, tenorStep, opts) {
+        if (opts.final) {
+            part.step = role.finalStep;
+            return [{ step: role.finalStep, at: 0, len: spanMin }];
+        }
+        if (opts.penult) {
+            part.step = role.penStep;
+            if (spanMin < 2) return [{ step: role.penStep, cents: role.penCents, at: 0, len: spanMin }];
+            return [
+                { step: role.preStep, at: 0, len: 1 },
+                { step: role.penStep, cents: role.penCents, at: 1, len: spanMin - 1 }
+            ];
+        }
+        if (opts.cadence) {
+            const goal = this.pickConsonant(part, role, tenorStep, true);
+            return [{ step: goal, at: 0, len: spanMin }];
+        }
+        if (opts.hocket) {
+            if (vIndex > 2) {   // any extra voice holds a perfect tone under the hocket
+                return [{ step: this.pickConsonant(part, role, tenorStep, true), at: 0, len: spanMin }];
+            }
+            const notes = [];
+            for (let m = vIndex === 1 ? 0 : 1; m < spanMin; m += 2) {
+                const step = m % 2 === 0 ? this.pickConsonant(part, role, tenorStep, false)
+                                         : this.stepwise(part, role);
+                notes.push({ step, at: m, len: 1 });
+            }
+            return notes;
+        }
+        const notes = [];
+        let m = 0;
+        if (!role.fast) {
+            // Motetus: nearer the semibreve — held consonances, minim pairs.
+            while (m < spanMin) {
+                if (spanMin - m >= 2 && Math.random() < 0.5) {
+                    notes.push({ step: this.pickConsonant(part, role, tenorStep, false), at: m, len: 2 });
+                    m += 2;
+                } else {
+                    notes.push({ step: this.pickConsonant(part, role, tenorStep, false), at: m, len: 1 });
+                    m += 1;
+                    if (m < spanMin) { notes.push({ step: this.stepwise(part, role), at: m, len: 1 }); m += 1; }
+                }
+            }
+            return notes;
+        }
+        // Triplum: minim motion with syncopations and semiminim ornaments.
+        while (m < spanMin) {
+            const strong = m % 2 === 0;
+            if (strong) {
+                notes.push({ step: this.pickConsonant(part, role, tenorStep, false), at: m, len: 1 });
+                m += 1;
+            } else if (!opts.dim && m + 2 <= spanMin && Math.random() < 0.18) {
+                // Syncopation across the beat — the nervous Ars Nova surface.
+                notes.push({ step: this.pickConsonant(part, role, tenorStep, false), at: m, len: 2 });
+                m += 2;
+            } else if (!opts.dim && Math.random() < 0.2) {
+                // Semiminim pair filling one weak minim.
+                notes.push({ step: this.stepwise(part, role), at: m, len: 0.5 });
+                notes.push({ step: this.stepwise(part, role), at: m + 0.5, len: 0.5 });
+                m += 1;
+            } else {
+                notes.push({ step: this.stepwise(part, role), at: m, len: 1 });
+                m += 1;
+            }
+        }
+        return notes;
+    }
+
+    /**
+     * Weave the sung upper voices across one tenor span (note or talea rest).
+     * Composition happens in composeLine; emission goes through the untouched
+     * playVoiceNote path (persistent singer chorus + shared note envelope),
+     * advancing the part's vowel per note as before.
+     */
+    weaveUpperVoices(spanMin, minimSec, tenorStep, opts) {
+        for (let v = 1; v < this.parts.length; v++) {
+            const part = this.parts[v];
+            const role = this.upperRoles[Math.min(v, this.upperRoles.length - 1)];
+            if (part.step === undefined || part.step === null) {
+                part.step = this.clampStep(tenorStep + (role.fast ? 7 : 4), role);
+            }
+            const notes = this.composeLine(part, role, v, spanMin, tenorStep, opts || {});
+            for (const n of notes) {
+                const freq = this.noteFreq(n.step, 0, n.cents || 0);
+                part.vowelPos = (part.vowelPos + 1) % part.vowels.length;
+                const vowel = part.vowels[part.vowelPos];
+                const prevFreq = n.at > 0 ? part._lastFreq : null;
+                this.playVoiceNote(part, freq, n.len * minimSec * 0.92, n.at * minimSec, vowel, prevFreq);
+                part._lastFreq = freq;
+            }
+        }
+    }
 
     start() {
         this.isPlaying = true;
-        this.taleaPos = 0;
-        this.colorPos = 0;
+        this.tenorIndex = 0;
+        this.inRest = false;
+        this.pass = 0;
+        for (const part of this.parts) { part.step = undefined; part._lastFreq = null; }
         this.scheduleTenorNote();
     }
 
@@ -293,59 +485,69 @@ class ArsNovaEngine {
     }
 
     /**
-     * One tenor talea-step. The tenor takes its duration from the talea and its
-     * pitch from the color; the two arrays advance independently and precess.
-     * The faster sung upper voices are then woven across the same span.
+     * One tenor event of the Machaut isorhythm: pitch[i] = color[i mod 28],
+     * duration[i] = talea[i mod 4]; after every 4th color note the tenor falls
+     * SILENT for 3 semibreves (the talea rest) while the sung voices sail on —
+     * except after the 7th, final talea, which ends straight on D3. Each talea
+     * closes with an open-5th+octave cadence; notes 24–25 hocket; the last two
+     * carry the double-leading-tone close. When the color completes, a second
+     * pass restates it in DIMINUTION (talea durations halved), then da capo.
      */
     scheduleTenorNote() {
         if (!this.isPlaying || !this.parts.length) return;
-        const pair = this.taleae[this.taleaIndex];
-        const talea = pair.talea;
-        const color = pair.color;
-        const beat = 60 / this.tempo;
+        const sb = 30 / this.tempo;              // one semibreve ≈ 0.47 s at the default tactus
+        const minim = sb / 2;
+        const dim = this.pass === 1;             // diminution pass
 
-        const durBeats = talea[this.taleaPos];
-        const tenorDur = durBeats * beat * this.tenorScale;
-        const tenorDeg = color[this.colorPos];
+        // --- Talea rest: the tenor is silent, the upper voices keep moving ---
+        if (this.inRest) {
+            this.inRest = false;
+            const restBeats = dim ? this.taleaRestBeats / 2 : this.taleaRestBeats;
+            const spanMin = Math.max(2, Math.round(restBeats * 2));
+            // Anchor the counterpoint on the tenor pitch about to re-enter.
+            const anchor = this.color[this.tenorIndex % this.color.length];
+            this.weaveUpperVoices(spanMin, minim, anchor, { dim });
+            this.stepTimeout = setTimeout(() => this.scheduleTenorNote(), restBeats * sb * 1000);
+            return;
+        }
 
+        const i = this.tenorIndex;
+        const taleaPos = i % this.talea.length;
+        const tenorStep = this.color[i];
+        const durBeats = dim ? this.talea[taleaPos] / 2 : this.talea[taleaPos];
+        const spanSec = durBeats * sb;
+        const spanMin = Math.max(1, Math.round(durBeats * 2));
+        const isFinal = i === this.color.length - 1;
+
+        // --- The instrumental tenor: one note of the cantus firmus ---
         const tenor = this.parts[0];
         if (tenor && tenor.role === 'tenor') {
-            const freq = this.degToFreq(tenorDeg, tenor.octave);
-            this.playTenorNote(tenor, freq, tenorDur * 0.96, 0);
+            const freq = this.noteFreq(tenorStep, tenor.octave, 0);
+            this.playTenorNote(tenor, freq, spanSec * 0.96, 0);
         }
 
-        // Upper voices: subdivide the tenor span into faster, stepwise sung figures.
-        for (let v = 1; v < this.parts.length; v++) {
-            const part = this.parts[v];
-            const count = Math.max(2, Math.round(durBeats * part.density));
-            const sub = tenorDur / count;
-            for (let i = 0; i < count; i++) {
-                // Random walk mostly by step, kept within a modal range.
-                const step = Math.round((Math.random() - 0.5) * 3.2);
-                part.mel += step;
-                if (part.mel > 9) part.mel -= 3;
-                if (part.mel < 1) part.mel += 3;
-                const freq = this.degToFreq(part.mel, part.octave);
-                // Advance the sung vowel per note — a little text-like motion.
-                part.vowelPos = (part.vowelPos + 1) % part.vowels.length;
-                const vowel = part.vowels[part.vowelPos];
-                const prevFreq = i > 0 ? part._lastFreq : null;
-                this.playVoiceNote(part, freq, sub * 0.94, i * sub, vowel, prevFreq);
-                part._lastFreq = freq;
-            }
-        }
+        // --- The sung upper voices, woven across the same span ---
+        this.weaveUpperVoices(spanMin, minim, tenorStep, {
+            cadence: taleaPos === this.talea.length - 1 && !isFinal,
+            final: isFinal,
+            penult: i === this.color.length - 2,
+            hocket: !dim && i >= 24 && i <= 25,   // short hocket opening the last talea
+            dim
+        });
 
-        // Advance talea and color independently — the heart of isorhythm.
-        this.taleaPos = (this.taleaPos + 1) % talea.length;
-        this.colorPos++;
-        if (this.colorPos >= color.length) {
-            this.colorPos = 0;
-            // On each full color, switch talea/color pair for long-form variety.
-            this.taleaIndex = (this.taleaIndex + 1) % this.taleae.length;
-            this.taleaPos = this.taleaPos % this.taleae[this.taleaIndex].talea.length;
+        // --- Advance the isorhythm ---
+        this.tenorIndex++;
+        let gap = spanSec;
+        if (isFinal) {
+            // Color complete: breathe, then the diminution pass (or da capo).
+            this.tenorIndex = 0;
+            this.pass = (this.pass + 1) % 2;
+            for (const part of this.parts) { part.step = undefined; part._lastFreq = null; }
+            gap = spanSec + sb * 2.5;
+        } else if (taleaPos === this.talea.length - 1) {
+            this.inRest = true;                   // every talea but the last closes with its rest
         }
-
-        this.stepTimeout = setTimeout(() => this.scheduleTenorNote(), tenorDur * 1000);
+        this.stepTimeout = setTimeout(() => this.scheduleTenorNote(), gap * 1000);
     }
 
     /**
@@ -462,7 +664,9 @@ class ArsNovaEngine {
 
     setMode(mode) {
         this.currentMode = mode;
-        for (const part of this.parts) part.mel = this.modes[mode].tenor;
+        // Re-seat each sung line: weaveUpperVoices re-initialises part.step on
+        // the next span, in the new mode's interval colouring.
+        for (const part of this.parts) part.step = undefined;
     }
 
     setVoices(count) {
