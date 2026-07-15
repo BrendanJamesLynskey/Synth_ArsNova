@@ -1,6 +1,8 @@
 # Synth Ars Nova — Isorhythmic Sung Motet
 
-A web-based synthesizer that weaves the 14th-century French **Ars Nova** in real time in the browser. No samples, no external dependencies — the isorhythmic motet was *sung*, so the haunting upper voices are built with the shared **FOF vocal-synthesis** library ([`vocal-voices.js`](vocal-voices.js), the IRCAM *CHANT* method — sung Latin vowels from overlapping formant grains) over an **isorhythmic** *talea/color* engine carried on a sustained **instrumental tenor**, using only the Web Audio API.
+A web-based synthesizer that weaves the 14th-century French **Ars Nova** in real time in the browser. The isorhythmic motet was *sung*, so the haunting upper voices are now **real recorded singing**: the shared [`vocal-voices.js`](vocal-voices.js) library plays actual sung vowels from the [**VocalSet**](https://zenodo.org/records/1193957) corpus (CC BY 4.0), pitch-mapped with **formant-preserving** TD-PSOLA, over an **isorhythmic** *talea/color* engine carried on a sustained **instrumental tenor**. (The earlier pure-synthesis engines, including FOF/*CHANT*, remain available.)
+
+> **Credit:** sampled voices derived from [**VocalSet**](https://zenodo.org/records/1193957) (Wilkins, Seetharaman, Wahl & Pardo, ISMIR 2018), CC BY 4.0.
 
 **[Launch the app](https://brendanjameslynskey.github.io/Synth_ArsNova/)** — auto-detects your device and recommends desktop or mobile.
 

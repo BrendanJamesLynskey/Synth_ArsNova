@@ -1,6 +1,8 @@
 /**
  * vocal-voices.js — a small library of interchangeable VOCAL SYNTHESIS engines
- * for the Web Audio API, sharing one interface. No samples, no dependencies.
+ * for the Web Audio API, sharing one interface. The 'sampler' engine plays real
+ * recorded vowels (VocalSet, CC BY 4.0) from ./voices/; every other engine is
+ * pure synthesis with no samples or dependencies.
  *
  * Techniques (each a genuinely different way of making a sung voice):
  *
@@ -30,6 +32,13 @@
  */
 (function (global) {
     'use strict';
+
+    // Directory this script was loaded from, so the sampled-voice assets in
+    // ./voices/ resolve correctly however the page is hosted.
+    const SCRIPT_DIR = (function () {
+        try { const s = document.currentScript && document.currentScript.src; if (s) return s.replace(/[^/]*$/, ''); } catch (e) {}
+        return '';
+    })();
 
     // ── Sung-vowel formant tables: five formants {f: Hz, a: amp, bw: Hz} ─────────
     const VOWELS = {
@@ -131,18 +140,45 @@
     // worklets whose modules were added to it), so the library is safe even if
     // an app builds more than one context.
     async function init(ctx) {
-        if (ctx.__vocalWorklets) return true;
-        try {
-            for (const src of [FOF_SRC, TRACT_SRC]) {
-                const url = URL.createObjectURL(new Blob([src], { type: 'application/javascript' }));
-                await ctx.audioWorklet.addModule(url);
+        if (!ctx.__vocalWorklets) {
+            try {
+                for (const src of [FOF_SRC, TRACT_SRC]) {
+                    const url = URL.createObjectURL(new Blob([src], { type: 'application/javascript' }));
+                    await ctx.audioWorklet.addModule(url);
+                }
+                ctx.__vocalWorklets = true;
+            } catch (e) {
+                ctx.__vocalWorklets = false;
             }
-            ctx.__vocalWorklets = true;
-        } catch (e) {
-            ctx.__vocalWorklets = false;
         }
+        await loadSamples(ctx);           // decode the real-voice sample bank (safe if it 404s)
         return !!ctx.__vocalWorklets;
     }
+
+    // ── Sampled-voice bank (real VocalSet vowels, formant-preserving pitch grid) ──
+    // Loaded once per context. Each loop is a seamless, steady sung vowel at a
+    // known pitch; the runtime detunes the nearest loop by ≤ a few semitones.
+    async function loadSamples(ctx) {
+        if (ctx.__vocalSamples || ctx.__vocalSamplesTried) return ctx.__vocalSamples;
+        ctx.__vocalSamplesTried = true;
+        const base = api.sampleBase || (SCRIPT_DIR + 'voices/');
+        try {
+            const grid = await (await fetch(base + 'grid.json')).json();
+            const map = {}, byPartVowel = {};
+            await Promise.all(grid.map(async (g) => {
+                const ab = await (await fetch(base + g.file)).arrayBuffer();
+                const buffer = await ctx.decodeAudioData(ab);
+                const key = g.part + '_' + g.midi + '_' + g.vowel;
+                map[key] = { buffer, hz: g.hz, midi: g.midi, part: g.part, vowel: g.vowel };
+                const pk = g.part + '|' + g.vowel;
+                (byPartVowel[pk] = byPartVowel[pk] || []).push({ midi: g.midi, key });
+            }));
+            for (const k in byPartVowel) byPartVowel[k].sort((a, b) => a.midi - b.midi);
+            ctx.__vocalSamples = { map, byPartVowel };
+        } catch (e) { ctx.__vocalSamples = null; }
+        return ctx.__vocalSamples;
+    }
+    function hasSamples(ctx) { return !!(ctx && ctx.__vocalSamples); }
 
     function hasWorklets(ctx) { return !!(ctx && ctx.__vocalWorklets); }
 
@@ -169,6 +205,36 @@
         const n = 40, real = new Float32Array(n), imag = new Float32Array(n);
         for (let k = 1; k < n; k++) imag[k] = 1 / Math.pow(k, 1.2);
         return ctx.createPeriodicWave(real, imag, { disableNormalization: false });
+    }
+
+    // Bright, near-flat-spectrum impulse-train wave — the classic buzzy LPC /
+    // Speak-&-Spell excitation (many harmonics of nearly equal weight).
+    function impulseWave(ctx) {
+        const n = 32, real = new Float32Array(n), imag = new Float32Array(n);
+        for (let k = 1; k < n; k++) imag[k] = 1 / Math.sqrt(k);   // ~ -3 dB/oct, still buzzy
+        return ctx.createPeriodicWave(real, imag, { disableNormalization: false });
+    }
+
+    // A looping white-noise BufferSource (2 s), used as the hiss/aspiration/
+    // stochastic excitation in the vocoder, ddsp, klatt and lpc techniques.
+    function makeNoise(ctx) {
+        const buf = ctx.createBuffer(1, Math.floor(ctx.sampleRate * 2), ctx.sampleRate);
+        const d = buf.getChannelData(0);
+        for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+        const src = ctx.createBufferSource();
+        src.buffer = buf; src.loop = true;
+        return src;
+    }
+
+    // Sample a vowel's formant envelope (sum of Lorentzian peaks) at one frequency —
+    // this sets each vocoder band gain and each ddsp/klatt resonator amplitude.
+    function formantEnvAt(freq, formants) {
+        let amp = 0;
+        for (const fm of formants) {
+            const d = (freq - fm.f) / (fm.bw * 0.65);
+            amp += fm.a / (1 + d * d);
+        }
+        return amp;
     }
 
     // ── The voice factory ───────────────────────────────────────────────────────
@@ -203,6 +269,255 @@
                     else node.port.postMessage({ shape: TRACT_VOWELS[name2] });
                 },
                 dispose() { try { node.disconnect(); } catch (e) {} }
+            };
+        }
+
+        // ── Sampled real voice (VocalSet vowels, formant-preserving pitch grid) ──
+        // The most realistic engine: it plays actual recorded sung vowels, looped
+        // seamlessly, choosing the nearest pitch in the sample grid and detuning it
+        // by only a few semitones (so the vocal-tract formants stay put — no
+        // "chipmunk"). A small detuned/panned ensemble gives a choral width, and a
+        // gentle vibrato LFO rides each voice's detune.
+        if (technique === 'sampler' && hasSamples(ctx)) {
+            const bank = ctx.__vocalSamples;
+            const voicePref = opts.voice || 'auto';           // 'auto' | 'male' | 'female'
+            const size = opts.ensemble != null ? opts.ensemble : 3;
+            const vibDepthCents = opts.vibCents != null ? opts.vibCents : (vibDepth * 1200); // reuse vibDepth (ratio) → cents
+            const vibRate = opts.vibRate != null ? opts.vibRate : (4.6 + Math.random() * 1.2);
+
+            const out = ctx.createGain(); out.gain.value = 0;   // voice gate
+            // shared vibrato LFO → depth gain → fans out to every source.detune
+            const lfo = ctx.createOscillator(); lfo.frequency.value = vibRate;
+            const lfoDepth = ctx.createGain(); lfoDepth.gain.value = vibDepthCents;
+            lfo.connect(lfoDepth); lfo.start(ctx.currentTime + Math.random() * 0.1);
+
+            const hzToMidi = (hz) => 69 + 12 * Math.log2(hz / 440);
+            function pickPart(midi) {
+                if (voicePref === 'male') return 'm';
+                if (voicePref === 'female') return 'f';
+                return midi < 66 ? 'm' : 'f';                   // overlap at F#4
+            }
+            function pickLoop(vowelName, hz) {
+                const midi = hzToMidi(hz), part = pickPart(midi);
+                let list = bank.byPartVowel[part + '|' + vowelName] || bank.byPartVowel['m|' + vowelName] || bank.byPartVowel['f|' + vowelName];
+                if (!list || !list.length) return null;
+                let best = list[0], bd = Math.abs(list[0].midi - midi);
+                for (const e of list) { const d = Math.abs(e.midi - midi); if (d < bd) { bd = d; best = e; } }
+                return bank.map[best.key];
+            }
+
+            let current = null, curVowel = vowelName, curHz = 200;
+
+            function spawn(vowelName2, hz, atTime, glide, prevSet) {
+                const loop = pickLoop(vowelName2, hz);
+                if (!loop) return null;
+                const setGain = ctx.createGain(); setGain.gain.value = 0; setGain.connect(out);
+                const baseCents = 1200 * Math.log2(hz / loop.hz) + detuneCents;
+                const srcs = [];
+                for (let i = 0; i < size; i++) {
+                    const spread = size > 1 ? (i / (size - 1) - 0.5) : 0;   // -0.5..0.5
+                    const s = ctx.createBufferSource(); s.buffer = loop.buffer; s.loop = true;
+                    s.detune.value = baseCents + spread * 11 + (Math.random() - 0.5) * 4;  // ensemble detune
+                    lfoDepth.connect(s.detune);
+                    const g = ctx.createGain(); g.gain.value = 0.9 / Math.sqrt(size);
+                    let node = s;
+                    if (ctx.createStereoPanner) { const p = ctx.createStereoPanner(); p.pan.value = spread * 0.7; s.connect(g); g.connect(p); p.connect(setGain); }
+                    else { s.connect(g); g.connect(setGain); }
+                    s.start(atTime, Math.random() * (loop.buffer.duration * 0.5));         // decorrelated loop phase
+                    srcs.push(s);
+                }
+                // equal-power-ish crossfade in; fade previous out
+                const fade = glide && glide > 0 ? Math.min(0.12, glide) : 0.05;
+                setGain.gain.setValueAtTime(0, atTime);
+                setGain.gain.linearRampToValueAtTime(1, atTime + fade);
+                if (prevSet) {
+                    prevSet.node.gain.cancelScheduledValues(atTime);
+                    prevSet.node.gain.setValueAtTime(prevSet.node.gain.value, atTime);
+                    prevSet.node.gain.linearRampToValueAtTime(0, atTime + fade);
+                    const dead = prevSet; setTimeout(() => { dead.srcs.forEach((s) => { try { s.stop(); } catch (e) {} }); try { dead.node.disconnect(); } catch (e) {} }, (fade + 0.05) * 1000 + 30);
+                }
+                return { node: setGain, srcs, key: loop.part + '_' + loop.midi + '_' + vowelName2 };
+            }
+
+            function retarget(vowelName2, hz, t, glide) {
+                const loop = pickLoop(vowelName2, hz);
+                const newKey = loop ? loop.part + '_' + loop.midi + '_' + vowelName2 : null;
+                if (current && newKey === current.key) {
+                    // same loop: just glide the detune of the live ensemble
+                    const baseCents = 1200 * Math.log2(hz / loop.hz) + detuneCents;
+                    current.srcs.forEach((s, i) => {
+                        const spread = size > 1 ? (i / (size - 1) - 0.5) : 0;
+                        const target = baseCents + spread * 11;
+                        s.detune.cancelScheduledValues(t);
+                        s.detune.setValueAtTime(s.detune.value, t);
+                        if (glide && glide > 0) s.detune.linearRampToValueAtTime(target, t + glide);
+                        else s.detune.setValueAtTime(target, t);
+                    });
+                } else {
+                    current = spawn(vowelName2, hz, t, glide, current) || current;
+                }
+                curVowel = vowelName2; curHz = hz;
+            }
+
+            return {
+                technique, output: out,
+                setFrequency(f, t, glide) { retarget(curVowel, f, t, glide); },
+                setLevel(v, t) { out.gain.cancelScheduledValues(t); out.gain.setValueAtTime(out.gain.value, t); out.gain.linearRampToValueAtTime(v, t + 0.02); },
+                setVowel(name2, t) { if (name2 !== curVowel) retarget(name2, curHz, t, 0.06); },
+                dispose() { try { lfo.stop(); } catch (e) {} if (current) current.srcs.forEach((s) => { try { s.stop(); } catch (e) {} }); try { out.disconnect(); } catch (e) {} }
+            };
+        }
+
+        // ── Channel vocoder / VODER (Dudley, Bell Labs 1939) ────────────────────
+        // Buzz (pulse train at f0) + hiss (noise) split through a bank of band-pass
+        // filters whose gains are the vowel's formant envelope at each band centre.
+        if (technique === 'vocoder') {
+            const out = ctx.createGain(); out.gain.value = 0;      // out gain = the voice gate
+            let formants = VOWELS[vowelName];
+            const buzz = ctx.createOscillator(); buzz.setPeriodicWave(glottalWave(ctx)); buzz.detune.value = detuneCents;
+            const buzzGain = ctx.createGain(); buzzGain.gain.value = 1; buzz.connect(buzzGain);
+            const hiss = makeNoise(ctx);
+            const hissGain = ctx.createGain(); hissGain.gain.value = 0.05 + breath * 0.6; hiss.connect(hissGain);
+            const NB = 14, fmin = 180, fmax = 4200;
+            const bands = [];
+            for (let i = 0; i < NB; i++) {
+                const cf = fmin * Math.pow(fmax / fmin, i / (NB - 1));
+                const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = cf; bp.Q.value = 5.5;
+                const g = ctx.createGain(); g.gain.value = formantEnvAt(cf, formants);
+                buzzGain.connect(bp); hissGain.connect(bp); bp.connect(g); g.connect(out);
+                bands.push({ cf, g });
+            }
+            buzz.start(ctx.currentTime); hiss.start(ctx.currentTime);
+            return {
+                technique, output: out,
+                setFrequency(f, t, glide) {
+                    const target = f * detuneFactor;
+                    if (glide && glide > 0) { buzz.frequency.setValueAtTime(buzz.frequency.value || target, t); buzz.frequency.exponentialRampToValueAtTime(Math.max(1, target), t + glide); }
+                    else buzz.frequency.setValueAtTime(target, t);
+                },
+                setLevel(v, t) { out.gain.cancelScheduledValues(t); out.gain.setValueAtTime(v, t); },
+                setVowel(name2, t) { formants = VOWELS[name2]; bands.forEach((b) => b.g.gain.setValueAtTime(formantEnvAt(b.cf, formants), t)); },
+                dispose() { try { buzz.stop(); } catch (e) {} try { hiss.stop(); } catch (e) {} try { out.disconnect(); } catch (e) {} }
+            };
+        }
+
+        // ── DDSP-style harmonic + filtered noise (Engel et al. 2020) ────────────
+        // A formant-weighted harmonic oscillator summed with time-varying
+        // formant-shaped filtered noise — the classic-meets-neural bridge.
+        if (technique === 'ddsp') {
+            const out = ctx.createGain(); out.gain.value = 0;
+            let formants = VOWELS[vowelName];
+            let lastF0 = 200;
+            const osc = ctx.createOscillator(); osc.setPeriodicWave(formantWave(ctx, lastF0, formants)); osc.detune.value = detuneCents;
+            const harm = ctx.createGain(); harm.gain.value = 0.92; osc.connect(harm); harm.connect(out);
+            const noise = makeNoise(ctx);
+            const nGain = ctx.createGain(); nGain.gain.value = 0.10 + breath * 0.5;
+            const nb = [0, 2, 3].map((idx) => {
+                const bp = ctx.createBiquadFilter(); bp.type = 'bandpass';
+                bp.frequency.value = formants[idx].f; bp.Q.value = Math.max(0.6, formants[idx].f / (formants[idx].bw * 2));
+                noise.connect(bp); bp.connect(nGain); return { bp, idx };
+            });
+            nGain.connect(out);
+            osc.start(ctx.currentTime); noise.start(ctx.currentTime);
+            return {
+                technique, output: out,
+                setFrequency(f, t, glide) {
+                    const target = f * detuneFactor;
+                    if (glide && glide > 0) { osc.frequency.setValueAtTime(osc.frequency.value || target, t); osc.frequency.exponentialRampToValueAtTime(Math.max(1, target), t + glide); }
+                    else osc.frequency.setValueAtTime(target, t);
+                    if (Math.abs(f - lastF0) > lastF0 * 0.02) { lastF0 = f; try { osc.setPeriodicWave(formantWave(ctx, f, formants)); } catch (e) {} }
+                },
+                setLevel(v, t) {
+                    out.gain.cancelScheduledValues(t); out.gain.setValueAtTime(v, t);
+                    // loudness also drives the noise/harmonic balance (more air when soft)
+                    nGain.gain.setValueAtTime((0.10 + breath * 0.5) * (0.6 + 0.4 * (1 - Math.min(1, v))), t);
+                },
+                setVowel(name2, t) {
+                    formants = VOWELS[name2];
+                    try { osc.setPeriodicWave(formantWave(ctx, lastF0, formants)); } catch (e) {}
+                    nb.forEach((n) => { n.bp.frequency.setValueAtTime(formants[n.idx].f, t); });
+                },
+                dispose() { try { osc.stop(); } catch (e) {} try { noise.stop(); } catch (e) {} try { out.disconnect(); } catch (e) {} }
+            };
+        }
+
+        // ── Klatt-style cascade formant synth (Klatt KLSYN, 1980) ───────────────
+        // A voicing source (+ aspiration) through a CASCADE of formant resonators;
+        // the series product yields the correct relative formant amplitudes.
+        if (technique === 'klatt') {
+            const out = ctx.createGain(); out.gain.value = 0;
+            let formants = VOWELS[vowelName];
+            const src = ctx.createOscillator(); src.setPeriodicWave(glottalWave(ctx)); src.detune.value = detuneCents;
+            const srcGain = ctx.createGain(); srcGain.gain.value = 1; src.connect(srcGain);
+            const asp = makeNoise(ctx); const aspGain = ctx.createGain(); aspGain.gain.value = 0.02 + breath * 0.25; asp.connect(aspGain);
+            const sum = ctx.createGain(); srcGain.connect(sum); aspGain.connect(sum);
+            // Cascade of peaking resonators: each boosts its formant while passing the
+            // rest of the source spectrum, so the series product is the vowel envelope
+            // (audible, unlike series band-pass which starves the fundamental).
+            const res = [];
+            let chain = sum;
+            for (let i = 0; i < 5; i++) {           // F1..F5 in cascade
+                const pk = ctx.createBiquadFilter(); pk.type = 'peaking';
+                pk.frequency.value = formants[i].f;
+                pk.Q.value = Math.max(0.7, formants[i].f / formants[i].bw);
+                pk.gain.value = 4 + 11 * formants[i].a;     // dB boost ∝ formant amplitude
+                chain.connect(pk); chain = pk; res.push(pk);
+            }
+            // A gentle low-shelf cut tames the un-radiated low end (lip radiation ~ +6dB/oct).
+            const tilt = ctx.createBiquadFilter(); tilt.type = 'highpass'; tilt.frequency.value = 90; tilt.Q.value = 0.5;
+            const makeup = ctx.createGain(); makeup.gain.value = 0.6; chain.connect(tilt); tilt.connect(makeup); makeup.connect(out);
+            src.start(ctx.currentTime); asp.start(ctx.currentTime);
+            return {
+                technique, output: out,
+                setFrequency(f, t, glide) {
+                    const target = f * detuneFactor;
+                    if (glide && glide > 0) { src.frequency.setValueAtTime(src.frequency.value || target, t); src.frequency.exponentialRampToValueAtTime(Math.max(1, target), t + glide); }
+                    else src.frequency.setValueAtTime(target, t);
+                },
+                setLevel(v, t) { out.gain.cancelScheduledValues(t); out.gain.setValueAtTime(v, t); },
+                setVowel(name2, t) {
+                    formants = VOWELS[name2];
+                    res.forEach((pk, i) => { pk.frequency.setValueAtTime(formants[i].f, t); pk.Q.setValueAtTime(Math.max(0.7, formants[i].f / formants[i].bw), t); pk.gain.setValueAtTime(4 + 11 * formants[i].a, t); });
+                },
+                dispose() { try { src.stop(); } catch (e) {} try { asp.stop(); } catch (e) {} try { out.disconnect(); } catch (e) {} }
+            };
+        }
+
+        // ── LPC — all-pole resonator bank (Atal/Itakura; TI Speak & Spell 1978) ──
+        // A bright impulse-train (voiced) / noise (unvoiced) excitation through a
+        // parallel bank of poles, plus a soft waveshaper for the iconic robotic grit.
+        if (technique === 'lpc') {
+            const out = ctx.createGain(); out.gain.value = 0;
+            let formants = VOWELS[vowelName];
+            const buzz = ctx.createOscillator(); buzz.setPeriodicWave(impulseWave(ctx)); buzz.detune.value = detuneCents;
+            const buzzGain = ctx.createGain(); buzzGain.gain.value = 1; buzz.connect(buzzGain);
+            const hiss = makeNoise(ctx); const hissGain = ctx.createGain(); hissGain.gain.value = 0.03 + breath * 0.3; hiss.connect(hissGain);
+            const grit = ctx.createWaveShaper();
+            const curve = new Float32Array(1024);
+            for (let i = 0; i < 1024; i++) { const x = i / 512 - 1; curve[i] = Math.tanh(2.2 * x); }
+            grit.curve = curve; grit.oversample = '2x';
+            const poles = formants.map((fm) => {
+                const bp = ctx.createBiquadFilter(); bp.type = 'bandpass';
+                bp.frequency.value = fm.f; bp.Q.value = Math.max(0.7, fm.f / fm.bw);
+                const g = ctx.createGain(); g.gain.value = fm.a;
+                buzzGain.connect(bp); hissGain.connect(bp); bp.connect(g); g.connect(grit);
+                return { bp, g };
+            });
+            grit.connect(out);
+            buzz.start(ctx.currentTime); hiss.start(ctx.currentTime);
+            return {
+                technique, output: out,
+                setFrequency(f, t, glide) {
+                    const target = f * detuneFactor;
+                    if (glide && glide > 0) { buzz.frequency.setValueAtTime(buzz.frequency.value || target, t); buzz.frequency.exponentialRampToValueAtTime(Math.max(1, target), t + glide); }
+                    else buzz.frequency.setValueAtTime(target, t);
+                },
+                setLevel(v, t) { out.gain.cancelScheduledValues(t); out.gain.setValueAtTime(v, t); },
+                setVowel(name2, t) {
+                    formants = VOWELS[name2];
+                    poles.forEach((p, i) => { p.bp.frequency.setValueAtTime(formants[i].f, t); p.bp.Q.setValueAtTime(Math.max(0.7, formants[i].f / formants[i].bw), t); p.g.gain.setValueAtTime(formants[i].a, t); });
+                },
+                dispose() { try { buzz.stop(); } catch (e) {} try { hiss.stop(); } catch (e) {} try { out.disconnect(); } catch (e) {} }
             };
         }
 
@@ -255,12 +570,19 @@
         };
     }
 
+    // Ordered earliest → most modern, so the explorer walks history left-to-right.
     const TECHNIQUES = [
-        { id: 'fof',      name: 'FOF (CHANT)',    blurb: 'Overlapping formant grains, one burst per glottal pulse — the IRCAM CHANT method.' },
-        { id: 'formant',  name: 'Formant filter', blurb: 'A glottal-pulse oscillator through parallel resonant band-pass formants (source–filter).' },
-        { id: 'additive', name: 'Additive',       blurb: 'A sum of harmonics whose amplitudes trace the vowel formant envelope (spectral).' },
-        { id: 'tract',    name: 'Vocal tract',    blurb: 'A Kelly–Lochbaum waveguide of the vocal tract, excited by a glottal pulse (physical model).' }
+        { id: 'sampler',  name: 'Sampled voice',   blurb: 'Real recorded sung vowels (VocalSet), looped and pitch-mapped with formant preservation — the most realistic voice.' },
+        { id: 'vocoder',  name: 'Channel vocoder', blurb: 'Buzz + hiss split through a band-pass bank gated by the vowel envelope — Dudley\'s VODER (1939).' },
+        { id: 'formant',  name: 'Formant filter',  blurb: 'A glottal-pulse oscillator through parallel resonant band-pass formants (source–filter, PAT/OVE).' },
+        { id: 'klatt',    name: 'Klatt cascade',   blurb: 'A voicing source + aspiration through a cascade of formant resonators — KLSYN / DECtalk (1980).' },
+        { id: 'tract',    name: 'Vocal tract',     blurb: 'A Kelly–Lochbaum waveguide of the vocal tract, excited by a glottal pulse (physical model, 1962).' },
+        { id: 'lpc',      name: 'LPC (all-pole)',  blurb: 'A bright impulse/noise excitation through an all-pole resonator bank — Speak & Spell (1978).' },
+        { id: 'fof',      name: 'FOF (CHANT)',     blurb: 'Overlapping formant grains, one burst per glottal pulse — the IRCAM CHANT method (1979).' },
+        { id: 'additive', name: 'Additive / SMS',  blurb: 'A sum of harmonics tracing the vowel formant envelope (sinusoidal / spectral modelling, 1986).' },
+        { id: 'ddsp',     name: 'DDSP harmonic+noise', blurb: 'A harmonic oscillator bank summed with formant-shaped filtered noise — the neural bridge (2020).' }
     ];
 
-    global.VocalVoices = { init, hasWorklets, create, VOWELS, TRACT_VOWELS, TECHNIQUES };
+    const api = { init, hasWorklets, hasSamples, loadSamples, create, VOWELS, TRACT_VOWELS, TECHNIQUES, sampleBase: null };
+    global.VocalVoices = api;
 })(typeof self !== 'undefined' ? self : this);

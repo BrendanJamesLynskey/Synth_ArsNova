@@ -204,7 +204,8 @@ class ArsNovaEngine {
             const detunes = [0, 7];
             const singers = detunes.map((cents, di) => {
                 const v = VocalVoices.create(this.ctx, {
-                    technique: 'fof', vowel: vowel0, detuneCents: detuneCents + cents,
+                    technique: 'sampler', voice: 'auto', ensemble: 1,   // app already layers singers (was 'fof')
+                    vowel: vowel0, detuneCents: detuneCents + cents,
                     breath: 0.06, vibDepth: 0.006 + di * 0.001
                 });
                 const sg = this.ctx.createGain();
