@@ -197,8 +197,60 @@ class ArsNovaEngine {
         };
         this.virelaiForm = ['a1','a2','bo','bc','a1','a2','a1','a2'];
         this.virelaiPos = 0;
-        // A loose vowel plan echoing "Dou-ce da-me jo-li-e".
-        this.virelaiVowels = ['u','e','a','e','o','i','e'];
+
+        // === The sung TEXT — Machaut's own French, syllabified & aligned ===
+        // Each entry is [syllable, vowel, noteCount]; noteCount > 1 binds an
+        // ornamental semiminim run to ONE syllable as a small melisma. The
+        // syllable string feeds the library's consonant ARTICULATOR (its
+        // Latin/Romance parser), so spellings are lightly normalised: French
+        // qu = [k] not Latin [kw] ("que"→"ke", "Qu'a"→"ka"); "che"/"chie" →
+        // "ce"/"cie" so the c softens to [ʃ] (Latin ch would harden to [k]);
+        // silent h dropped ("hum"→"um"); accents dropped ("dès"→"des"). Sung
+        // vowels come from each syllable's spoken vowel: ou/o→o · ai/ei→e ·
+        // u→u · e→e · eu→e (nearest formant set to [ø]) · oi→a · nasal
+        // an/en→a, on→o. Final consonants are sounded (Middle French usage).
+        //   a1 · "Douce dame jolie, / pour Dieu ne pensés mie"    (19 notes:
+        //        melismas on "li" ×3, "sés" ×2, "mi" ×3)
+        //   a2 · "que nulle ait seignourie / sur moi fors vous
+        //        seulement."                            (15 notes, strict 1:1)
+        //   bo · verse "Qu'adès sans tricherie / Chierie / Vous ay
+        //        et humblement"                (19 notes: "e"×3, "ri"×2)
+        //   bc · verse "Tous les jours de ma vie / Servie / Sans
+        //        villain pensement."     (20 notes: "e"×3, "vi"×2, "e"×2)
+        // (The engine's form repeats a1·a2 for tierce and final refrain, so
+        // those statements re-sing the refrain text.)
+        this.virelaiText = {
+            a1: [ ['Dou','o',1],['ce','e',1],['da','a',1],['me','e',1],['jo','o',1],
+                  ['li','i',3],['e','e',1],
+                  ['pour','o',1],['Dieu','e',1],['ne','e',1],['pen','a',1],
+                  ['ses','e',2],['mi','i',3],['e','e',1] ],
+            a2: [ ['ke','e',1],['nul','u',1],['le','e',1],['ait','e',1],['sei','e',1],
+                  ['gnou','o',1],['ri','i',1],['e','e',1],
+                  ['sur','u',1],['moi','a',1],['fors','o',1],['vous','o',1],
+                  ['seul','e',1],['e','e',1],['ment','a',1] ],
+            bo: [ ['ka','a',1],['des','e',1],['sans','a',1],['tri','i',1],['ce','e',1],
+                  ['ri','i',1],['e','e',3],
+                  ['cie','i',1],['ri','i',2],['e','e',1],
+                  ['vous','o',1],['ay','e',1],['e','e',1],['um','u',1],['ble','e',1],['ment','a',1] ],
+            bc: [ ['tous','o',1],['les','e',1],['jours','o',1],['de','e',1],['ma','a',1],
+                  ['vi','i',1],['e','e',3],
+                  ['ser','e',1],['vi','i',2],['e','e',2],
+                  ['sans','a',1],['vil','i',1],['lain','e',1],['pen','a',1],['se','e',1],['ment','a',1] ]
+        };
+
+        // === Motet text — the Mass KYRIE, mapped MELISMATICALLY ===
+        // One syllable per melodic phrase/ordo group (each woven tenor-span
+        // group = one melisma): the onset consonant sounds only at the
+        // group's FIRST note, the coda (the -n of "son") at its LAST, and
+        // the whole melisma rides the syllable's vowel. Triplum and motetus
+        // each advance their OWN stream through
+        //   Ky-ri-e e-le-i-son / Chri-ste e-le-i-son / Ky-ri-e e-le-i-son
+        // ("Chri" hardens to [k] in the articulator — Christe = Kriste).
+        this.kyrieText = [
+            ['Ky','i'],['ri','i'],['e','e'],['e','e'],['le','e'],['i','i'],['son','o'],
+            ['Chri','i'],['ste','e'],['e','e'],['le','e'],['i','i'],['son','o'],
+            ['Ky','i'],['ri','i'],['e','e'],['e','e'],['le','e'],['i','i'],['son','o']
+        ];
     }
 
     async init() {
@@ -372,6 +424,28 @@ class ArsNovaEngine {
         const now = this.ctx.currentTime;
         part.singers.forEach(v => v.setVowel(vowel, now));
         part.vowel = vowel;
+    }
+
+    /** Advance a sung part's own Kyrie stream: one syllable per melisma group. */
+    nextKyrieSyl(part) {
+        if (part.sylPos === undefined || part.sylPos === null) part.sylPos = -1;
+        part.sylPos = (part.sylPos + 1) % this.kyrieText.length;
+        return this.kyrieText[part.sylPos];
+    }
+
+    /**
+     * Guarded consonant articulation on a sung part's primary singer (only
+     * one of the chorus articulates, so consonants don't flam). startSec /
+     * endSec are offsets from now; the library wants absolute context times
+     * and schedules onset consonants to END at the syllable start, the coda
+     * to fire at the syllable end, through its ungated consonant tap.
+     */
+    articulateSyl(part, text, startSec, endSec, freq) {
+        const v = part.singers && part.singers[0];
+        if (v && v.articulate) {
+            const now = this.ctx.currentTime;
+            v.articulate(text, now + startSec, now + endSec, freq);
+        }
     }
 
     // === The isorhythmic engine — Machaut, Kyrie I (Messe de Nostre Dame) ===
@@ -627,6 +701,10 @@ class ArsNovaEngine {
         // between triplum and motetus (a lone voice hockets against silence).
         if (opts.hocket && sung.length) {
             const start = tenorStep + 7;
+            // Each voice's share of the traded ladder is ONE melisma group:
+            // one Kyrie syllable, its vowel on every dealt minim, the onset
+            // consonant at that voice's first note, the coda at its last.
+            const hock = new Map();
             for (let k = 0; k < spanMin; k++) {
                 // With one sung voice, the odd minims stay silent — the rests
                 // are what make it a hocket.
@@ -636,10 +714,16 @@ class ArsNovaEngine {
                 const role = this.upperRoles[part.role];
                 const step = this.clampStep(start - Math.floor(k / 2) - (k % 2), role);
                 const freq = this.noteFreq(step, 0, 0);
-                part.vowelPos = (part.vowelPos + 1) % part.vowels.length;
-                this.playVoiceNote(part, freq, minimSec * 0.8, k * minimSec, part.vowels[part.vowelPos], null);
+                let h = hock.get(part);
+                if (!h) { h = { syl: this.nextKyrieSyl(part), firstAt: k, firstFreq: freq, lastAt: k }; hock.set(part, h); }
+                h.lastAt = k;
+                this.playVoiceNote(part, freq, minimSec * 0.8, k * minimSec, h.syl[1], null);
                 part.step = step;
                 part._lastFreq = freq;
+            }
+            for (const [part, h] of hock) {
+                this.articulateSyl(part, h.syl[0], h.firstAt * minimSec,
+                                   (h.lastAt + 0.8) * minimSec, h.firstFreq);
             }
             return;
         }
@@ -651,14 +735,21 @@ class ArsNovaEngine {
                 part.step = this.clampStep(tenorStep + (role.fast ? 7 : 4), role);
             }
             const notes = this.composeLine(part, role, 0, spanMin, tenorStep, opts);
+            if (!notes.length) continue;
+            // This whole woven group is ONE melisma on the part's next Kyrie
+            // syllable: the syllable's vowel colours every note; consonants
+            // sound only at the group's first note (onset) and last (coda).
+            const syl = this.nextKyrieSyl(part);
             for (const n of notes) {
                 const freq = this.noteFreq(n.step, 0, n.cents || 0);
-                part.vowelPos = (part.vowelPos + 1) % part.vowels.length;
-                const vowel = part.vowels[part.vowelPos];
                 const prevFreq = n.at > 0 ? part._lastFreq : null;
-                this.playVoiceNote(part, freq, n.len * minimSec * 0.92, n.at * minimSec, vowel, prevFreq);
+                this.playVoiceNote(part, freq, n.len * minimSec * 0.92, n.at * minimSec, syl[1], prevFreq);
                 part._lastFreq = freq;
             }
+            const last = notes[notes.length - 1];
+            this.articulateSyl(part, syl[0], notes[0].at * minimSec,
+                               (last.at + last.len * 0.92) * minimSec,
+                               this.noteFreq(notes[0].step, 0, notes[0].cents || 0));
         }
     }
 
@@ -708,7 +799,7 @@ class ArsNovaEngine {
         this.inRest = false;
         this.pass = 0;
         this.virelaiPos = 0;
-        for (const part of this.parts) { part.step = undefined; part._lastFreq = null; part._cadGoal = null; part._bias = 0; }
+        for (const part of this.parts) { part.step = undefined; part._lastFreq = null; part._cadGoal = null; part._bias = 0; part.sylPos = undefined; }
         // Pick the piece: 'auto' alternates motet ↔ virelai on successive starts.
         this.activePiece = this.piece === 'auto'
             ? (this._pieceCycle++ % 2 === 0 ? 'motet' : 'virelai')
@@ -752,14 +843,37 @@ class ArsNovaEngine {
         }
 
         if (singer) {
-            let t = 0, prevFreq = null, prevStep = null;
+            // SYLLABIC delivery of the real text: expand the phrase's aligned
+            // [syllable, vowel, noteCount] plan into per-note vowels and
+            // per-syllable events (a syllable ends with its LAST note).
+            const syls = this.virelaiText[key] || [];
+            const starts = []; let acc = 0;
+            for (const n of phrase) { starts.push(acc); acc += n[1]; }
+            const vowelAt = [], events = [];
+            {
+                let j = 0;
+                for (const [text, vowel, count] of syls) {
+                    if (j >= phrase.length) break;
+                    const lastIdx = Math.min(j + count, phrase.length) - 1;
+                    events.push({ text, first: j,
+                        end: (starts[lastIdx] + phrase[lastIdx][1] * 0.94) * sb });
+                    for (let c = 0; c < count && j < phrase.length; c++) vowelAt[j++] = vowel;
+                }
+                for (; j < phrase.length; j++) vowelAt[j] = j > 0 ? vowelAt[j - 1] : 'a';
+            }
+            let t = 0, prevFreq = null, prevStep = null, ei = 0;
             for (let ni = 0; ni < phrase.length; ni++) {
                 const [step, len, cents] = phrase[ni];
                 const freq = this.noteFreqIn(1, step, 0, cents || 0);
-                const vowel = this.virelaiVowels[(this.virelaiPos * 3 + ni) % this.virelaiVowels.length];
+                const vowel = vowelAt[ni];
                 // Legato glide only on adjacent stepwise motion mid-phrase.
                 const slide = (prevStep !== null && Math.abs(step - prevStep) === 1) ? prevFreq : null;
                 this.playVoiceNote(singer, freq, len * sb * 0.94, t, vowel, slide);
+                // Articulate every syllable at its onset (coda at its end).
+                if (ei < events.length && events[ei].first === ni) {
+                    this.articulateSyl(singer, events[ei].text, t, events[ei].end, freq);
+                    ei++;
+                }
                 t += len * sb;
                 prevFreq = freq; prevStep = step;
             }
