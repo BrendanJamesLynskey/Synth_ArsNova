@@ -1643,8 +1643,10 @@ class ArsNovaEngine {
         // === Instrumental FM presets (carrier:modulator ratio + base mod index) ===
         // Tenor: a mellow bowed/reed/organ colour for the sustained cantus firmus.
         // Contratenor: a slightly hollower, reedier partner in the same register.
-        this.tenorPreset  = { ratio: 1.0, index: 2.2, wave: 'sine' };
-        this.contraPreset = { ratio: 2.0, index: 1.4, wave: 'sine' };
+        // Indices kept modest — the scaffold must stay warm and sit UNDER the
+        // sung voices; a gentle per-note lowpass rounds off the FM sidebands.
+        this.tenorPreset  = { ratio: 1.0, index: 1.8, wave: 'sine' };
+        this.contraPreset = { ratio: 2.0, index: 1.0, wave: 'sine' };
 
         // === Sung-vowel formant tables (F1..F4 centre frequencies, Hz) ===
         this.vowels = {
@@ -1881,7 +1883,12 @@ class ArsNovaEngine {
         busGain.connect(this.voiceBus);
 
         // Per-part fixed detune so the ensemble is a living, slightly-out choir.
-        const detuneCents = (index - 1.5) * 6 + (Math.random() - 0.5) * 4;
+        // Sung parts may sit a few cents apart (their own chorus blurs it); the
+        // INSTRUMENTAL scaffold must stay near-true — a sustained tenor even
+        // 9 cents off makes every fifth and octave against the singers beat.
+        const detuneCents = cfg.vocal
+            ? (index - 1.5) * 5 + (Math.random() - 0.5) * 3
+            : (index - 1.5) * 1.6 + (Math.random() - 0.5) * 2;
 
         const part = {
             role: cfg.role, vocal: cfg.vocal, octave: cfg.octave, vol: cfg.vol,
@@ -1898,12 +1905,19 @@ class ArsNovaEngine {
             const vowels = cfg.vowels;
             const vowel0 = vowels[0];
             // Two folds per note (a hair of detune) make each singer fuller.
-            const detunes = [0, 7];
+            const detunes = [0, 5];
             const singers = detunes.map((cents, di) => {
                 const v = VocalVoices.create(this.ctx, {
                     technique: 'sampler', voice: 'auto', ensemble: 1,   // app already layers singers (was 'fof')
                     vowel: vowel0, detuneCents: detuneCents + cents,
-                    breath: 0.06, vibDepth: 0.006 + di * 0.001
+                    breath: 0.06,
+                    // Explicit vibrato depth in cents (overrides the library's
+                    // ~30 c default): Ars Nova's fast melismatic surface wants
+                    // a moderate, early-music vibrato — and the two stacked
+                    // folds each carry their OWN uncorrelated vibrato, so deep
+                    // settings beat against each other. Triplum a touch
+                    // livelier than motetus (cfg.vibCents per role).
+                    vibCents: (cfg.vibCents || 17) + di * 2
                 });
                 const sg = this.ctx.createGain();
                 sg.gain.value = di === 0 ? 1.0 : 0.55;
@@ -1930,11 +1944,14 @@ class ArsNovaEngine {
         // (the full Machaut-Mass texture). Indices 0 and 3 are INSTRUMENTAL
         // scaffold voices; 1 and 2 are SUNG, each with its own vowel colour
         // (triplum bright e/i/a · motetus dark o/a/u).
+        // The SUNG upper voices carry the piece; the instrumental scaffold sits
+        // a few dB under them (it was the other way round — a loud dull FM
+        // drone burying the singers). vibCents: triplum slightly livelier.
         const layout = [
-            { role: 'tenor',       vocal: false, octave: 0, vol: 0.50, density: 0,   vowels: null            },
-            { role: 'triplum',     vocal: true,  octave: 1, vol: 0.32, density: 3.0, vowels: ['e','i','a']   },
-            { role: 'motetus',     vocal: true,  octave: 0, vol: 0.32, density: 1.4, vowels: ['o','a','u']   },
-            { role: 'contratenor', vocal: false, octave: 0, vol: 0.38, density: 0,   vowels: null            }
+            { role: 'tenor',       vocal: false, octave: 0, vol: 0.27, density: 0,   vowels: null                          },
+            { role: 'triplum',     vocal: true,  octave: 1, vol: 0.48, density: 3.0, vowels: ['e','i','a'], vibCents: 19   },
+            { role: 'motetus',     vocal: true,  octave: 0, vol: 0.42, density: 1.4, vowels: ['o','a','u'], vibCents: 15   },
+            { role: 'contratenor', vocal: false, octave: 0, vol: 0.20, density: 0,   vowels: null                          }
         ];
         for (let i = 0; i < this.numVoices; i++) {
             this.parts.push(this.createPart(layout[i], i));
@@ -2372,13 +2389,15 @@ class ArsNovaEngine {
         const phraseLen = phrase.reduce((s, n) => s + n[1], 0);
 
         // Bourdon: tenor on D3 (a-phrases) / A3 (b-phrases); contratenor a 5th up.
+        // Played SOFT (levelScale) — it is an accompaniment under a solo song,
+        // and a full-strength 9-second FM drone buries the singer.
         const tenor = this.parts[0];
         if (tenor && !tenor.vocal) {
-            this.playTenorNote(tenor, this.noteFreqIn(1, isB ? 4 : 0, 0, 0), phraseLen * sb * 0.96, 0);
+            this.playTenorNote(tenor, this.noteFreqIn(1, isB ? 4 : 0, 0, 0), phraseLen * sb * 0.96, 0, 0.55);
         }
         const contra = this.parts.find(p => !p.vocal && p.role === 'contratenor');
         if (contra) {
-            this.playTenorNote(contra, this.noteFreqIn(1, isB ? 8 : 4, 0, 0), phraseLen * sb * 0.96, 0);
+            this.playTenorNote(contra, this.noteFreqIn(1, isB ? 8 : 4, 0, 0), phraseLen * sb * 0.96, 0, 0.55);
         }
 
         if (singer) {
@@ -2547,7 +2566,9 @@ class ArsNovaEngine {
         g.cancelScheduledValues(t0);
         g.setValueAtTime(Math.max(0.0001, g.value), t0);
         g.linearRampToValueAtTime(peak, t0 + attack);
-        g.setValueAtTime(peak * 0.92, t0 + Math.max(attack, duration * 0.6));
+        // Ramp (not step) into the sustain shelf — a setValueAtTime here put a
+        // small amplitude CLICK on every sung note.
+        g.linearRampToValueAtTime(peak * 0.92, t0 + Math.max(attack, duration * 0.6));
         g.exponentialRampToValueAtTime(0.0008, t0 + duration + release);
     }
 
@@ -2556,11 +2577,12 @@ class ArsNovaEngine {
      * an enveloped modulation index, amplitude ADSR, and gentle vibrato — a
      * bowed/reed/organ colour grounding the sung polyphony above.
      */
-    playTenorNote(part, freq, duration, delay) {
+    playTenorNote(part, freq, duration, delay, levelScale) {
         if (!isFinite(freq) || freq <= 0 || !isFinite(duration) || duration <= 0) return;
         const t0 = this.ctx.currentTime + (delay || 0);
         const p = part.preset;
-        const detune = part.detuneCents + (Math.random() - 0.5) * 4;
+        const level = levelScale != null ? levelScale : 1;
+        const detune = part.detuneCents + (Math.random() - 0.5) * 2;
 
         // --- Carrier ---
         const carrier = this.ctx.createOscillator();
@@ -2576,37 +2598,51 @@ class ArsNovaEngine {
         mod.detune.value = detune;
 
         // --- Modulation-index envelope (peak deviation, Hz), brightness-scaled ---
-        const bright = 0.5 + this.brightness * 0.9;
+        const bright = 0.45 + this.brightness * 0.7;
         const peakDev = p.index * modFreq * bright;
         const modGain = this.ctx.createGain();
         const atk = Math.min(0.06, duration * 0.2);
         const dec = Math.min(0.4, duration * 0.5);
         modGain.gain.setValueAtTime(Math.max(1, peakDev * 0.4), t0);
-        modGain.gain.linearRampToValueAtTime(peakDev * 1.3, t0 + atk);            // soft bowed swell
+        modGain.gain.linearRampToValueAtTime(peakDev * 1.2, t0 + atk);            // soft bowed swell
         modGain.gain.exponentialRampToValueAtTime(Math.max(1, peakDev * 0.6), t0 + atk + dec);
         modGain.gain.exponentialRampToValueAtTime(Math.max(1, peakDev * 0.4), t0 + duration);
         mod.connect(modGain);
         modGain.connect(carrier.frequency);
 
-        // --- Amplitude ADSR (slow, sustained) ---
+        // --- Gentle lowpass rounds the FM sidebands into a warm wooden tone ---
+        const lp = this.ctx.createBiquadFilter();
+        lp.type = 'lowpass';
+        lp.frequency.value = Math.min(2400, freq * (5 + this.brightness * 5));
+        lp.Q.value = 0.4;
+
+        // --- Amplitude ADSR (slow, sustained; ramped shelf — no step clicks) ---
         const amp = this.ctx.createGain();
         const a = Math.min(0.18, duration * 0.25);
         const r = Math.max(0.3, duration * 0.4);
         amp.gain.setValueAtTime(0, t0);
-        amp.gain.linearRampToValueAtTime(0.85, t0 + a);
-        amp.gain.setValueAtTime(0.78, t0 + Math.max(a, duration * 0.6));
+        amp.gain.linearRampToValueAtTime(0.85 * level, t0 + a);
+        amp.gain.linearRampToValueAtTime(0.76 * level, t0 + Math.max(a, duration * 0.6));
         amp.gain.exponentialRampToValueAtTime(0.001, t0 + duration + r);
-        carrier.connect(amp);
+        carrier.connect(lp);
+        lp.connect(amp);
         amp.connect(part.busGain);
 
-        // --- Slow vibrato on the long held tenor ---
+        // --- Slow vibrato on the long held tenor. The modulator TRACKS the
+        // vibrato (scaled by its ratio) so the FM spectrum stays harmonic as
+        // the pitch waves — carrier-only vibrato smeared the sidebands into an
+        // un-instrumental chorus wobble. ---
         if (duration > 0.6) {
             const vib = this.ctx.createOscillator();
             vib.type = 'sine';
-            vib.frequency.value = 4.4 + Math.random() * 0.8;
+            vib.frequency.value = 4.2 + Math.random() * 0.8;
             const vibDepth = this.ctx.createGain();
-            vibDepth.gain.value = freq * 0.004;
-            vib.connect(vibDepth); vibDepth.connect(carrier.frequency);
+            vibDepth.gain.value = freq * 0.003;
+            const vibMod = this.ctx.createGain();
+            vibMod.gain.value = p.ratio;
+            vib.connect(vibDepth);
+            vibDepth.connect(carrier.frequency);
+            vibDepth.connect(vibMod); vibMod.connect(mod.frequency);
             vib.start(t0 + a); vib.stop(t0 + duration + r);
         }
 
