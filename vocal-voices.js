@@ -196,6 +196,20 @@
         for (let i = 0; i < n; i++) d[i] = Math.random() * 2 - 1;
         ctx.__vocalNoise = buf; return buf;
     }
+    // A slow, smooth random-walk control signal in [-1,1] (20 s, looped). Used
+    // to give each looped-sample layer its own aperiodic pitch/amplitude drift,
+    // so a short loop repeated under a long held note never reads as identical
+    // stitched copies — the seam and spectral repeat are smeared into a living,
+    // breathing sustain. One buffer per context; each layer reads it at a random
+    // rate and phase, so layers stay decorrelated.
+    function getDrift(ctx) {
+        if (ctx.__vocalDrift) return ctx.__vocalDrift;
+        const n = Math.floor(ctx.sampleRate * 20), buf = ctx.createBuffer(1, n, ctx.sampleRate), d = buf.getChannelData(0);
+        let vel = 0, val = 0, mx = 1e-6;
+        for (let i = 0; i < n; i++) { vel += (Math.random() * 2 - 1) * 0.0009; vel *= 0.9992; val += vel; d[i] = val; if (Math.abs(val) > mx) mx = Math.abs(val); }
+        for (let i = 0; i < n; i++) d[i] /= mx;                 // normalise to ±1
+        ctx.__vocalDrift = buf; return buf;
+    }
     // Phone → articulation params. cls: 'fric'|'stop'|'nasal'|'liquid'|'aspirate'.
     // cf/Q = band-pass centre/width of the noise; dur seconds; lvl relative gain;
     // voiced = add a pitched bed; closure = silent gap before a stop's burst.
@@ -394,7 +408,19 @@
                 if (!loop) return null;
                 const setGain = ctx.createGain(); setGain.gain.value = 0; setGain.connect(out);
                 const baseCents = 1200 * Math.log2(hz / loop.hz) + detuneCents;
-                const srcs = [];
+                const srcs = [], mods = [];
+                // Give a modulation param its own slow, aperiodic drift (from the
+                // shared random-walk buffer, read at a random rate/phase) so this
+                // layer's loop never repeats identically. Returns the source so it
+                // can be stopped on respawn/dispose (else it leaks & keeps drifting).
+                function addDrift(param, depth) {
+                    const nz = ctx.createBufferSource(); nz.buffer = getDrift(ctx); nz.loop = true;
+                    nz.playbackRate.value = 0.6 + Math.random() * 0.8;     // each layer drifts at its own slow rate
+                    const dg = ctx.createGain(); dg.gain.value = depth;
+                    nz.connect(dg); dg.connect(param);
+                    nz.start(atTime, Math.random() * 18);                  // random phase into the 20 s walk
+                    mods.push(nz);
+                }
                 for (let i = 0; i < size; i++) {
                     const spread = size > 1 ? (i / (size - 1) - 0.5) : 0;   // -0.5..0.5
                     const s = ctx.createBufferSource(); s.buffer = loop.buffer; s.loop = true;
@@ -405,6 +431,11 @@
                     if (ctx.createStereoPanner) { const p = ctx.createStereoPanner(); p.pan.value = spread * 0.7; s.connect(g); g.connect(p); p.connect(setGain); }
                     else { s.connect(g); g.connect(setGain); }
                     s.start(atTime, Math.random() * (loop.buffer.duration * 0.5));         // decorrelated loop phase
+                    // anti-repetition: a few cents of aperiodic pitch drift + a few
+                    // percent of amplitude shimmer, independent per layer, so a short
+                    // loop under a long note stops sounding like stitched copies.
+                    addDrift(s.detune, 7.5);
+                    addDrift(g.gain, 0.06 / Math.sqrt(size));
                     srcs.push(s);
                 }
                 // equal-power-ish crossfade in; fade previous out
@@ -415,9 +446,9 @@
                     prevSet.node.gain.cancelScheduledValues(atTime);
                     prevSet.node.gain.setValueAtTime(prevSet.node.gain.value, atTime);
                     prevSet.node.gain.linearRampToValueAtTime(0, atTime + fade);
-                    const dead = prevSet; setTimeout(() => { dead.srcs.forEach((s) => { try { s.stop(); } catch (e) {} }); try { dead.node.disconnect(); } catch (e) {} }, (fade + 0.05) * 1000 + 30);
+                    const dead = prevSet; setTimeout(() => { dead.srcs.forEach((s) => { try { s.stop(); } catch (e) {} }); (dead.mods || []).forEach((s) => { try { s.stop(); } catch (e) {} }); try { dead.node.disconnect(); } catch (e) {} }, (fade + 0.05) * 1000 + 30);
                 }
-                return { node: setGain, srcs, key: loop.part + '_' + loop.midi + '_' + vowelName2 };
+                return { node: setGain, srcs, mods, key: loop.part + '_' + loop.midi + '_' + vowelName2 };
             }
 
             function retarget(vowelName2, hz, t, glide) {
@@ -511,7 +542,7 @@
                     const t = ctx.currentTime, fade = 0.2;
                     try { out.gain.cancelScheduledValues(t); out.gain.setValueAtTime(out.gain.value, t); out.gain.linearRampToValueAtTime(0, t + fade); } catch (e) {}
                     try { lfo.stop(t + fade + 0.05); } catch (e) {}
-                    if (current) current.srcs.forEach((s) => { try { s.stop(t + fade + 0.05); } catch (e) {} });
+                    if (current) { current.srcs.forEach((s) => { try { s.stop(t + fade + 0.05); } catch (e) {} }); (current.mods || []).forEach((s) => { try { s.stop(t + fade + 0.05); } catch (e) {} }); }
                     setTimeout(() => { try { out.disconnect(); } catch (e) {} try { consBus.disconnect(); } catch (e) {} try { voiceOut.disconnect(); } catch (e) {} }, (fade + 0.1) * 1000);
                 }
             };
